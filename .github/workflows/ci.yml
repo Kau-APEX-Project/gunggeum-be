@@ -1,0 +1,43 @@
+# PR·main push 마다 API 테스트 (LLM 키 없이: 질의응답은 가짜 Core, 운영 DB 는 Postgres 서비스, Redis 는 fakeredis)
+# + Nginx 설정 문법 검사
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: gbg
+        ports: ['5433:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 20
+    env:
+      TEST_PG_ADMIN_URL: postgresql://postgres:gbg@127.0.0.1:5433/postgres
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: api/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q --timeout 60
+
+  nginx:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: nginx -t
+        run: |
+          docker run --rm --add-host api:127.0.0.1 --add-host realtime:127.0.0.1 \
+            -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            -v "$PWD/nginx/proxy.conf:/etc/nginx/proxy.conf:ro" \
+            nginx:1.27-alpine nginx -t

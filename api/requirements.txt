@@ -1,0 +1,14 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+psycopg[binary,pool]
+redis==5.2.1
+amazon-transcribe==0.6.2
+tzdata
+httpx==0.28.1
+# vendor/gunggeum_server (팀 deploy/server/requirements.txt 와 같음)
+boto3
+korean-romanizer
+numpy
+openai
+pgvector
+python-dotenv

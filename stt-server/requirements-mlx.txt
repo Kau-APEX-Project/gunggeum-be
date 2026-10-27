@@ -1,0 +1,3 @@
+# 3안 Mac mini (Apple Silicon): WHISPER_BACKEND=mlx
+-r requirements.txt
+mlx-whisper==0.4.2

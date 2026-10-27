@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>宮今 라이브 투어 테스터</title>
+<style>
+  :root { --bg:#f6f5f3; --card:#fff; --line:#ddd8d4; --fg:#222; --muted:#777; --red:#c8102e; --blue:#2457c5; --green:#1f7a5c; }
+  * { box-sizing: border-box }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); background:var(--card) }
+  header h1 { margin:0; font-size:17px } header p { margin:2px 0 0; color:var(--muted); font-size:12px }
+  main { display:grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap:14px; padding:14px 20px }
+  section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; min-width:0 }
+  h2 { font-size:14px; margin:0 0 10px } h2 span { color:var(--muted); font-weight:400; font-size:12px }
+  .row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:8px }
+  input, select, button { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:5px; background:#fff }
+  input { min-width:0; flex:1 }
+  button { cursor:pointer } button:hover { border-color:#999 }
+  button.primary { background:var(--red); color:#fff; border-color:var(--red) }
+  button:disabled { opacity:.45; cursor:default }
+  .kv { font:12px ui-monospace, Menlo, monospace; background:#f2f0ee; border-radius:5px; padding:6px 8px; word-break:break-all; margin-bottom:8px; white-space:pre-wrap }
+  .log { height:260px; overflow:auto; font:12px ui-monospace, Menlo, monospace; background:#1e1c1b; color:#e8e4e1; border-radius:6px; padding:8px }
+  .log div { white-space:pre-wrap; word-break:break-all; margin-bottom:2px }
+  .out { color:#ffb86b } .in { color:#8be9fd } .sys { color:#9aa }
+  .subs { min-height:90px; max-height:220px; overflow:auto; border:1px solid var(--line); border-radius:6px; padding:8px; margin-bottom:8px }
+  .sub { margin-bottom:8px } .sub small { display:block; color:var(--muted) }
+  .sub a { color:var(--red); text-decoration:underline; cursor:pointer }
+  .gap { color:#b26b00; font-size:12px } .badge { font-size:12px; padding:1px 7px; border-radius:10px; background:#eee }
+  .on { background:#fde5e8; color:var(--red) } .ok { background:#e2f2ec; color:var(--green) }
+  #rec.recording { background:var(--red); color:#fff }
+  .hint { color:var(--muted); font-size:12px; margin:0 0 8px }
+</style>
+</head>
+<body>
+<header>
+  <h1>宮今 라이브 투어 테스터</h1>
+  <p>세션 REST 4개 + WebSocket 2개(해설사 · 관람객)를 한 화면에서 시험합니다. 개발용 (DEV_TOOLS=1). 같은 주소를 두 탭·두 기기에서 열어 해설사와 관람객을 나눠도 됩니다.</p>
+</header>
+<main>
+  <section>
+    <h2>① 세션 <span>REST</span></h2>
+    <div class="row"><input id="title" placeholder="투어 제목" value="테스트 해설"><input id="guideName" placeholder="가이드 이름" value="Guide Kim"></div>
+    <div class="row"><input id="accessCode" placeholder="가이드 접근 코드 (설정했으면)"><input id="tourTime" placeholder="일정 연결 HH:MM (선택)"></div>
+    <div class="row"><label><input type="checkbox" id="consent" checked> 음성 미저장 동의</label>
+      <button class="primary" id="create">POST /api/sessions</button></div>
+    <div class="row"><input id="code" placeholder="세션 코드 GB-0000"><input id="token" placeholder="가이드 토큰"></div>
+    <div class="row">
+      <button id="info">GET 정보</button><button id="summary">GET 요약</button><button id="end">POST 종료</button>
+    </div>
+    <div class="kv" id="rest">응답이 여기에 나옵니다</div>
+  </section>
+
+  <section>
+    <h2>② 해설사 소켓 <span>/ws/sessions/{code}/guide</span> <span class="badge" id="gState">끊김</span></h2>
+    <div class="row"><button id="gConnect">연결</button><button id="gClose">끊기</button><button id="gPing">ping</button></div>
+    <div class="row">
+      <select id="poi">
+        <option value="place:gwanghwamun-gate">광화문 place:gwanghwamun-gate</option>
+        <option value="place:heungnyemun-gate" selected>흥례문 place:heungnyemun-gate</option>
+        <option value="place:geunjeongjeon-hall">근정전 place:geunjeongjeon-hall</option>
+        <option value="place:gyotaejeon">교태전 place:gyotaejeon</option>
+        <option value="place:gyeonghoeru-pavilion">경회루 place:gyeonghoeru-pavilion</option>
+      </select><button id="loc">location 보내기</button>
+    </div>
+    <div class="row"><button id="micOn">mic on</button><button id="micOff">mic off</button>
+      <button id="rec" title="누르고 있는 동안 녹음 → 떼면 발화 하나로 전송 (STT 서버 필요)">🎙 누르고 말하기</button></div>
+    <div class="row"><input id="textKo" value="이곳은 근정전입니다. 월대 위에 서 보세요."><button id="sendText">text 보내기</button></div>
+    <p class="hint">text 는 STT 없이 문장을 직접 넣는 개발용 메시지입니다 (ALLOW_TEXT_INPUT=1). 녹음은 STT_PROVIDER=whisper_http 와 STT 서버가 켜져 있어야 합니다.</p>
+    <div class="log" id="gLog"></div>
+  </section>
+
+  <section>
+    <h2>③ 관람객 소켓 <span>/ws/sessions/{code}/listen</span> <span class="badge" id="lState">끊김</span> <span class="badge" id="mic">mic ?</span></h2>
+    <div class="row">
+      <select id="lang"><option value="en">en</option><option value="th">th</option><option value="ko">ko</option></select>
+      <button id="lConnect">연결</button><button id="lClose">끊기</button>
+      <button id="lResume" title="끊고 다시 연결한 뒤 마지막으로 받은 순번을 resume 으로 보냄">재연결 (resume)</button>
+    </div>
+    <div class="subs" id="subs"></div>
+    <div class="kv" id="card">자막의 빨간 글자를 누르면 GET /api/card 결과가 나옵니다</div>
+    <div class="log" id="lLog"></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const wsBase = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+let guide = null, listener = null, lastSeq = 0, recorder = null, chunks = [];
+
+function log(box, cls, text) {
+  const d = document.createElement('div');
+  d.className = cls;
+  d.textContent = new Date().toLocaleTimeString() + '  ' + text;
+  $(box).appendChild(d);
+  $(box).scrollTop = $(box).scrollHeight;
+}
+
+async function rest(method, path, body, headers = {}) {
+  const res = await fetch(path, { method, headers: { 'Content-Type': 'application/json', ...headers },
+                                  body: body ? JSON.stringify(body) : undefined });
+  const text = res.status === 204 ? '' : await res.text();
+  $('rest').textContent = `${method} ${path} → ${res.status}\n${text}`;
+  try { return [res.status, JSON.parse(text)]; } catch { return [res.status, null]; }
+}
+
+$('create').onclick = async () => {
+  const body = { consent: $('consent').checked, title: $('title').value || null, guideName: $('guideName').value || null };
+  if ($('accessCode').value) body.accessCode = $('accessCode').value;
+  if ($('tourTime').value) body.tourTime = $('tourTime').value;
+  const [status, data] = await rest('POST', '/api/sessions', body);
+  if (status === 201) { $('code').value = data.code; $('token').value = data.guideToken; }
+};
+$('info').onclick = () => rest('GET', `/api/sessions/${$('code').value}`);
+$('summary').onclick = () => rest('GET', `/api/sessions/${$('code').value}/summary`);
+$('end').onclick = () => rest('POST', `/api/sessions/${$('code').value}/end`, null, { Authorization: `Bearer ${$('token').value}` });
+
+// ② 해설사
+function gSend(msg) {
+  if (!guide || guide.readyState !== 1) return log('gLog', 'sys', '연결되어 있지 않음');
+  guide.send(JSON.stringify(msg));
+  log('gLog', 'out', '→ ' + JSON.stringify(msg));
+}
+$('gConnect').onclick = () => {
+  guide = new WebSocket(`${wsBase}/ws/sessions/${$('code').value}/guide?token=${encodeURIComponent($('token').value)}`);
+  guide.onopen = () => { $('gState').textContent = '연결됨'; $('gState').className = 'badge ok'; };
+  guide.onmessage = e => log('gLog', 'in', '← ' + e.data);
+  guide.onclose = e => { $('gState').textContent = `끊김 (${e.code})`; $('gState').className = 'badge'; log('gLog', 'sys', `닫힘 code=${e.code}`); };
+};
+$('gClose').onclick = () => guide && guide.close();
+$('gPing').onclick = () => gSend({ type: 'ping' });
+$('loc').onclick = () => gSend({ type: 'location', poiId: $('poi').value });
+$('micOn').onclick = () => gSend({ type: 'mic', on: true });
+$('micOff').onclick = () => gSend({ type: 'mic', on: false });
+$('sendText').onclick = () => gSend({ type: 'text', textKo: $('textKo').value });
+
+async function startRec() {
+  if (!guide || guide.readyState !== 1) return log('gLog', 'sys', '먼저 해설사 소켓을 연결하세요');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    chunks = [];
+    recorder = new MediaRecorder(stream, MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? { mimeType: 'audio/webm;codecs=opus' } : {});
+    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(chunks, { type: recorder.mimeType });
+      guide.send(await blob.arrayBuffer());   // 발화 하나 = binary 프레임 하나
+      log('gLog', 'out', `→ (binary) 발화 ${(blob.size / 1024).toFixed(1)}KB ${recorder.mimeType}`);
+    };
+    recorder.start();
+    $('rec').classList.add('recording');
+  } catch (e) { log('gLog', 'sys', '마이크를 열 수 없음: ' + e.message); }
+}
+function stopRec() { if (recorder && recorder.state === 'recording') recorder.stop(); $('rec').classList.remove('recording'); }
+$('rec').onpointerdown = startRec;
+$('rec').onpointerup = stopRec;
+$('rec').onpointerleave = stopRec;
+
+// ③ 관람객
+function esc(s) { return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+function renderLinks(text) {   // [이름](card:id) → 누르면 카드
+  return esc(text).replace(/\[([^\]]+)\]\(card:([bt]-\d+)\)/g, '<a data-card="$2">$1</a>');
+}
+function connectListener(resume) {
+  listener = new WebSocket(`${wsBase}/ws/sessions/${$('code').value}/listen?lang=${$('lang').value}`);
+  listener.onopen = () => {
+    $('lState').textContent = '연결됨'; $('lState').className = 'badge ok';
+    if (resume) { listener.send(JSON.stringify({ type: 'resume', lastSeq })); log('lLog', 'out', `→ {"type":"resume","lastSeq":${lastSeq}}`); }
+  };
+  listener.onmessage = e => {
+    log('lLog', 'in', '← ' + e.data);
+    const m = JSON.parse(e.data);
+    if (m.type === 'subtitle') {
+      lastSeq = m.seq;
+      $('subs').insertAdjacentHTML('beforeend', `<div class="sub">#${m.seq} ${renderLinks(m.text)}<small>${esc(m.textKo)}</small></div>`);
+      $('subs').scrollTop = $('subs').scrollHeight;
+    } else if (m.type === 'gap') {
+      $('subs').insertAdjacentHTML('beforeend', `<div class="gap">⚠ 놓친 자막 #${m.fromSeq}~#${m.toSeq}</div>`);
+    } else if (m.type === 'mic') {
+      $('mic').textContent = m.on ? 'mic on' : 'mic off (S-04)'; $('mic').className = 'badge ' + (m.on ? 'ok' : 'on');
+    } else if (m.type === 'session_ended') {
+      $('subs').insertAdjacentHTML('beforeend', '<div class="gap">세션 종료 → T-32</div>');
+    }
+  };
+  listener.onclose = e => { $('lState').textContent = `끊김 (${e.code})`; $('lState').className = 'badge'; log('lLog', 'sys', `닫힘 code=${e.code}`); };
+}
+$('lConnect').onclick = () => { lastSeq = 0; $('subs').innerHTML = ''; connectListener(false); };
+$('lClose').onclick = () => listener && listener.close();
+$('lResume').onclick = () => {
+  if (listener) listener.close();
+  log('lLog', 'sys', `끊고 재연결 (마지막 순번 ${lastSeq})`);
+  setTimeout(() => connectListener(true), 300);
+};
+$('subs').onclick = async e => {
+  const id = e.target.dataset && e.target.dataset.card;
+  if (!id) return;
+  const res = await fetch(`/api/card?id=${id}`);
+  $('card').textContent = `GET /api/card?id=${id} → ${res.status}\n` + (await res.text()).slice(0, 600);
+};
+</script>
+</body>
+</html>
