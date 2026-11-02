@@ -1,0 +1,5 @@
+{
+  "_note": "예시 2곳. 실제 파일은 AI 담당 hints_by_location.json(해설 위치 26곳)을 pois.json id 키로 변환해 STT_HINTS_PATH 로 지정",
+  "place:heungnyemun-gate": ["흥례문", "영제교"],
+  "place:geunjeongjeon-hall": ["근정전", "월대", "품계석"]
+}

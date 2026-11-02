@@ -1,0 +1,5 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+python-multipart==0.0.20
+faster-whisper==1.2.1
+av==15.1.0  # faster-whisper 1.2.1 은 PyAV 16+ 에서 디코딩 실패 (metadata_errors 인자 제거됨)

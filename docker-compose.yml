@@ -1,0 +1,81 @@
+# 宮今 BE — EC2 한 대에서 Docker Compose (학기 중 구현 아키텍처: Nginx · API 서비스 · 실시간 통역 · PostgreSQL · Redis)
+#   docker compose up -d --build
+#   → http://localhost:8080/api/docs
+# db 는 처음 뜰 때(볼륨이 비어 있을 때)만 db/ 의 00-vector.sql → docs.sql.gz 를 읽어 채움.
+# docs.sql.gz 를 바꾸면: docker compose down -v && docker compose up -d
+x-app: &app
+  build:
+    context: ./api
+    args:
+      GIT_SHA: ${GIT_SHA:-dev}
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-gbg}@db:5432/gbg   # 컨테이너 안에서는 db 로 접속
+    REDIS_URL: redis://redis:6379/0
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_started
+  restart: unless-stopped
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      # 터널(cloudflared)만 들어오게 기본은 이 PC 안에서만. EC2 는 HTTP_BIND=0.0.0.0 · HTTP_PORT=80 (보안 그룹은 CloudFront 대역만)
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/proxy.conf:/etc/nginx/proxy.conf:ro
+    depends_on:
+      - api
+      - realtime
+    restart: unless-stopped
+
+  api:   # REST: 질의응답 · 카드 · 코스 · 세션 · 일정 · 공지 · 집계
+    <<: *app
+    mem_limit: 1g
+
+  realtime:   # WebSocket: 실시간 통역 (해설사 음성 → 자막)
+    <<: *app
+    command: ["uvicorn", "app.live.main:app", "--host", "0.0.0.0", "--port", "8001", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    mem_limit: 512m
+
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: gbg
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-gbg}
+    ports:
+      - "127.0.0.1:5433:5432"   # 이 PC(서버) 안에서만. 로컬 개발·테스트·pg_dump 용
+    volumes:
+      - ./db:/docker-entrypoint-initdb.d:ro
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gbg"]
+      interval: 5s
+      retries: 20
+    mem_limit: 1g
+    restart: unless-stopped
+
+  redis:   # 세션 진행 상태 · 자막 Pub/Sub. 저장 안 함 (자막 원문을 디스크에 남기지 않음)
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb"]
+    mem_limit: 128m
+    restart: unless-stopped
+
+  # 온프레미스 개발 서버를 Cloudflare Tunnel 로 공개 (HTTPS). 켤 때만: docker compose --profile tunnel up -d
+  # Cloudflare 대시보드 → Zero Trust → Tunnels 의 Public Hostname 서비스 주소를 http://nginx:80 으로 지정
+  cloudflared:
+    image: cloudflare/cloudflared:2024.12.2
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - nginx
+    profiles: ["tunnel"]
+    restart: unless-stopped
+
+volumes:
+  db:
