@@ -91,8 +91,8 @@ async def add_notice(body: NoticeIn, who: str = Depends(admin), pool=Depends(db)
         if body.url and await (await c.execute('select 1 from notice where source_url = %s', (body.url,))).fetchone():
             raise ApiError(409, '같은 원문 URL 의 공지가 이미 있습니다')
         prefix = f"n-{t:%Y%m%d}-"
-        n = (await (await c.execute('select count(*) as n from notice where id like %s', (prefix + '%',))).fetchone())['n']
-        nid = f'{prefix}{n + 1:02d}'
+        n = (await (await c.execute("select coalesce(max(split_part(id, '-', 3)::int), 0) as n from notice where id like %s", (prefix + '%',))).fetchone())['n']
+        nid = f'{prefix}{n + 1:02d}'  # 가장 큰 번호 + 1 (개수 + 1 이면 지운 뒤 번호가 겹침)
         await c.execute('insert into notice (id, type, title, body, source_url, published_at, created_by) '
                         'values (%s, %s, %s, %s, %s, %s, %s)', (nid, body.type, body.title, body.body, body.url, t, who))
         for lang, tr in translations.items():

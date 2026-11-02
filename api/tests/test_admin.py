@@ -75,6 +75,15 @@ def test_notice_list_and_delete(client, admin_on):
     assert client.get('/api/notices').json()['notices'] == []
 
 
+def test_notice_id_after_delete(client, admin_on):
+    # 01·02 중 01을 지운 뒤 넣어도 id 가 겹치지 않음 (예전엔 개수 + 1 = 02 → 500)
+    add = lambda: client.post('/api/admin/notices', headers=ADMIN, json={'type': 'weather', 'title': 't', 'body': 'b'})
+    first, _ = add().json()['id'], add()
+    assert client.delete(f'/api/admin/notices/{first}', headers=ADMIN).status_code == 204
+    r = add()
+    assert r.status_code == 201 and r.json()['id'] == f"n-{now():%Y%m%d}-03"
+
+
 def test_tours_add_list_delete(client, admin_on):
     today = now().date().isoformat()
     r = client.post('/api/admin/tours', headers=ADMIN, json={'date': today, 'times': ['14:00', '10:00', '14:00'], 'durationMin': 50})

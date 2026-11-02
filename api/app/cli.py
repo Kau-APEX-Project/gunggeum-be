@@ -47,7 +47,7 @@ def notices(args):
             if not (args.title and args.body and args.type):
                 sys.exit('--type --title --body 가 필요합니다')
             day = now().strftime('%Y%m%d')
-            n = c.execute("select count(*) as n from notice where id like %s", (f'n-{day}-%',)).fetchone()['n']
+            n = c.execute("select coalesce(max(split_part(id, '-', 3)::int), 0) as n from notice where id like %s", (f'n-{day}-%',)).fetchone()['n']
             nid = f'n-{day}-{n + 1:02d}'
             c.execute('insert into notice (id, type, title, body, source_url, published_at) values (%s, %s, %s, %s, %s, %s)',
                       (nid, args.type, args.title, args.body, args.url, now()))
