@@ -75,7 +75,8 @@ class WhisperHttpSTT:
 class TranscribeSTT:
     """Amazon Transcribe 스트리밍. 해설사 연결 하나에 스트림 하나.
     위치별 어휘: TRANSCRIBE_VOCABULARY_PREFIX + poiId 이름으로 미리 만들어 둔 사용자 지정 어휘를 씀 → 위치가 바뀌면 스트림을 새로 엶.
-    오디오가 15초 넘게 안 오면 Transcribe 가 스트림을 닫으므로 다음 오디오에서 다시 엶. 과금은 1초 단위, 최소 요금 없음."""
+    오디오가 15초 넘게 안 오면 Transcribe 가 스트림을 닫으므로 다음 오디오에서 다시 엶. 과금은 1초 단위, 최소 요금 없음.
+    어휘가 AWS 에 없거나 아직 준비 중이면(BadRequest) 그 어휘는 기억해 두고 어휘 없이 받아씀 (자막이 끊기지 않게)."""
     utterance = False
 
     def __init__(self, on_final: OnFinal, hints: Hints):
@@ -83,19 +84,33 @@ class TranscribeSTT:
         self.stream = None
         self.reader: asyncio.Task | None = None
         self.vocab: str | None = None
+        self.bad_vocabs: set[str] = set()  # 열기에 실패한 어휘 (같은 어휘로 다시 시도하지 않음)
 
     def vocabulary(self, location: str | None) -> str | None:
         prefix = env('TRANSCRIBE_VOCABULARY_PREFIX')
         if prefix and location and self.hints.terms(location):
-            return prefix + location.replace(':', '-')  # 어휘 이름에 ':' 를 못 씀
-        return env('TRANSCRIBE_VOCABULARY') or None
+            name = prefix + location.replace(':', '-')  # 어휘 이름에 ':' 를 못 씀
+        else:
+            name = env('TRANSCRIBE_VOCABULARY') or None
+        return None if name in self.bad_vocabs else name
 
-    async def _open(self, vocab: str | None) -> None:
+    async def _start(self, vocab: str | None):
         from amazon_transcribe.client import TranscribeStreamingClient
         client = TranscribeStreamingClient(region=env('AWS_REGION', 'ap-northeast-2'))
         extra = {'vocabulary_name': vocab} if vocab else {}
-        self.stream = await client.start_stream_transcription(
+        return await client.start_stream_transcription(
             language_code='ko-KR', media_sample_rate_hz=int(env('AUDIO_SAMPLE_RATE', '16000')), media_encoding='pcm', **extra)
+
+    async def _open(self, vocab: str | None) -> None:
+        try:
+            self.stream = await self._start(vocab)
+        except Exception as e:
+            if vocab is None or not is_bad_request(e):
+                raise
+            log.warning('Transcribe 어휘 %s 를 쓸 수 없어 어휘 없이 받아씀: %s', vocab, e)
+            self.bad_vocabs.add(vocab)
+            vocab = None
+            self.stream = await self._start(None)
         self.vocab = vocab
         self.reader = asyncio.create_task(self._read(self.stream))
 
@@ -135,6 +150,15 @@ class TranscribeSTT:
                 await asyncio.wait_for(reader, timeout=5)
             except Exception:
                 reader.cancel()
+
+
+def is_bad_request(e: Exception) -> bool:
+    """Transcribe 가 요청 값(없는 어휘·준비 안 된 어휘 등)을 거절한 오류. 연결·권한 오류는 아님"""
+    try:
+        from amazon_transcribe.exceptions import BadRequestException
+    except ImportError:  # SDK 없이 도는 테스트
+        return type(e).__name__ == 'BadRequestException'
+    return isinstance(e, BadRequestException)
 
 
 PROVIDERS = {'whisper_http': WhisperHttpSTT, 'transcribe': TranscribeSTT, 'none': NoSTT}
