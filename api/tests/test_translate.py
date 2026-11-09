@@ -27,6 +27,12 @@ def run(coro):
     return asyncio.run(coro)
 
 
+@pytest.fixture(autouse=True)
+def terminology_mode(monkeypatch):
+    """아래 용어집 테스트는 TRANSLATE_TERM_MODE=terminology 기준 (substitute 테스트는 따로 바꿈)"""
+    monkeypatch.setenv('TRANSLATE_TERM_MODE', 'terminology')
+
+
 def test_uses_only_first_terminology(monkeypatch):
     monkeypatch.setenv('TRANSLATE_TERMINOLOGY', 'gunggeum-palace, other')
     client = FakeClient()
@@ -69,3 +75,113 @@ def test_shipped_terminology_csv_matches_card_names():
     terms = {r[0]: r[1] for r in rows[1:]}
     assert terms['근정전'] == 'Geunjeongjeon (Throne Hall)'  # 카드 name_en 과 같은 표기 (자막 카드 링크가 맞게)
     assert terms['정전'].startswith('Jeongjeon')
+
+
+@pytest.mark.parametrize('ko, spaced', [
+    ('근정전은 경복궁의 정전입니다.', '근정전 은 경복궁 의 정전 입니다.'),  # 서버 시험에서 용어집이 안 맞던 문장
+    ('경회루는 왕이 연회를 열던 누각입니다', '경회루 는 왕이 연회를 열던 누각입니다'),
+    ('근정전에서 경회루까지', '근정전 에서 경회루 까지'),
+    ('근정전 앞', '근정전 앞'),          # 이미 떨어져 있으면 그대로
+    ('오늘 날씨', '오늘 날씨'),
+])
+def test_split_particles(ko, spaced):
+    from app.live.translate import split_particles
+    terms = ('근정전', '경회루', '경복궁', '정전')  # 긴 것부터
+    assert split_particles(ko, terms) == spaced
+    assert split_particles('"근정전"은', terms) == '"근정전 "은'  # 앞 따옴표 뒤도 용어 시작으로 봄
+
+
+def test_glossary_terms_from_shipped_csv(monkeypatch):
+    from app.live.translate import glossary_terms
+    monkeypatch.delenv('TRANSLATE_TERMS_PATH', raising=False)
+    terms = glossary_terms()
+    assert '근정전' in terms and terms.index('근정전') < terms.index('정전')  # 긴 용어가 먼저
+
+
+def test_split_only_with_terminology(monkeypatch):
+    monkeypatch.delenv('TRANSLATE_TERMS_PATH', raising=False)
+    sent = []
+
+    class C:
+        def translate_text(self, **kw):
+            sent.append((kw['Text'], kw.get('TerminologyNames')))
+            return {'TranslatedText': 'x'}
+    monkeypatch.setenv('TRANSLATE_TERMINOLOGY', 'gungeum-ko')
+    run(AwsTranslator(C()).translate('근정전은 정전입니다.', 'en'))
+    monkeypatch.delenv('TRANSLATE_TERMINOLOGY')
+    run(AwsTranslator(C()).translate('근정전은 정전입니다.', 'en'))
+    assert sent == [('근정전 은 정전 입니다.', ['gungeum-ko']), ('근정전은 정전입니다.', None)]
+
+
+TABLE = {'근정전': {'en': 'Geunjeongjeon (Throne Hall)', 'th': 'คึนจองจอน (ท้องพระโรง)'},
+         '정전': {'en': 'Jeongjeon (main hall of a palace)', 'th': ''},
+         '경회루': {'en': 'Gyeonghoeru (Banquet Pavilion)', 'th': 'คยองฮเวรู (พลับพลาจัดงานเลี้ยง)'}}
+
+
+@pytest.mark.parametrize('ko, lang, out', [
+    ('근정전은 경복궁의 정전입니다.', 'en', 'Geunjeongjeon (Throne Hall)은 경복궁의 Jeongjeon (main hall of a palace)입니다.'),
+    ('근정전은 경복궁의 정전입니다.', 'th', 'คึนจองจอน (ท้องพระโรง)은 경복궁의 정전입니다.'),  # th 표기가 빈 용어는 그대로
+    ('근정전에서 경회루까지', 'en', 'Geunjeongjeon (Throne Hall)에서 Gyeonghoeru (Banquet Pavilion)까지'),
+    ('"경회루"는', 'en', '"Gyeonghoeru (Banquet Pavilion)"는'),
+    ('대근정전 앞', 'en', '대근정전 앞'),  # 어절 중간은 안 바꿈
+    ('근정전', 'ja', '근정전'),          # 없는 언어 열
+])
+def test_substitute_terms(ko, lang, out):
+    from app.live.translate import substitute_terms
+    assert substitute_terms(ko, lang, TABLE) == out
+
+
+def test_substitute_mode_is_default_and_skips_terminology(monkeypatch):
+    monkeypatch.delenv('TRANSLATE_TERM_MODE')
+    monkeypatch.delenv('TRANSLATE_SUBSTITUTE_LANGS', raising=False)
+    monkeypatch.delenv('TRANSLATE_TERMS_PATH', raising=False)
+    monkeypatch.setenv('TRANSLATE_TERMINOLOGY', 'gungeum-ko')
+    sent = []
+
+    class C:
+        def translate_text(self, **kw):
+            sent.append((kw['Text'], kw.get('TerminologyNames')))
+            return {'TranslatedText': kw['Text']}
+    t = AwsTranslator(C())
+    assert t.mode == 'substitute'
+    run(t.translate('근정전은 경복궁의 정전입니다.', 'en'))
+    th = run(t.translate('근정전은 경복궁의 정전입니다.', 'th'))  # 태국어는 GGT 토큰으로 보내고 되돌림
+    assert sent == [('Geunjeongjeon (Throne Hall)은 경복궁의 Jeongjeon (main hall of a palace)입니다.', None),
+                    ('GGT0은 경복궁의 GGT1입니다.', None)]
+    assert th == 'คึนจองจอน (ท้องพระโรง)은 경복궁의 ชองจอน (ท้องพระโรงหลัก)입니다.'
+    monkeypatch.setenv('TRANSLATE_SUBSTITUTE_LANGS', 'en,th')
+    sent.clear()
+    run(AwsTranslator(C()).translate('근정전은', 'th'))
+    assert sent == [('คึนจองจอน (ท้องพระโรง)은', None)]
+
+
+def test_substituted_names_still_link_cards():
+    from app.core import use_vendor
+    use_vendor()
+    import cards
+    metas = [{'type': 'building', 'serial': 160, 'name': '근정전', 'name_en': 'Geunjeongjeon (Throne Hall)',
+              'name_th': 'คึนจองจอน (ท้องพระโรง)'}]
+    en = 'Geunjeongjeon (Throne Hall) is the main hall of Gyeongbokgung Palace.'
+    assert cards.link_names(en, metas, 'English').startswith('[Geunjeongjeon](card:b-160) (Throne Hall)')
+    th = 'คึนจองจอน (ท้องพระโรง) เป็นท้องพระโรงหลัก'
+    assert '(card:b-160)' in cards.link_names(th, metas, 'ภาษาไทย')
+
+
+def test_placeholder_roman_and_restore():
+    from app.live.translate import placeholder_terms, restore_terms
+    text, marks = placeholder_terms('근정전에서 경회루까지, 근정전', 'th', TABLE, style='roman')
+    assert text == 'Geunjeongjeon에서 Gyeonghoeru까지, Geunjeongjeon'
+    assert marks == {'Geunjeongjeon': TABLE['근정전']['th'], 'Gyeonghoeru': TABLE['경회루']['th']}
+    out = restore_terms('เดินจาก Geunjeongjeon ถึง gyeonghoeru', marks)  # 대소문자 무시
+    assert out == f"เดินจาก {TABLE['근정전']['th']} ถึง {TABLE['경회루']['th']}"
+
+
+def test_placeholder_token_and_word_boundary():
+    from app.live.translate import placeholder_terms, restore_terms
+    table = {**TABLE, '정전': {'en': 'Jeongjeon (main hall of a palace)', 'th': 'ชองจอน'}}
+    text, marks = placeholder_terms('근정전은 정전입니다', 'th', table, style='token')
+    assert text == 'GGT0은 GGT1입니다'
+    # 로마자: Geunjeongjeon 안의 Jeongjeon 은 되돌리지 않음
+    _, marks = placeholder_terms('근정전은 정전입니다', 'th', table, style='roman')
+    assert restore_terms('Geunjeongjeon is Jeongjeon', marks) == f"{TABLE['근정전']['th']} is ชองจอน"
+    assert placeholder_terms('정전', 'ja', table) == ('정전', {})  # 그 언어 표기가 없으면 그대로
