@@ -23,8 +23,11 @@ CARD_LINK = re.compile(r'\(card:([bt]-\d+)\)')
 
 
 def correct(text_ko: str, terms: list[str]) -> str:
-    """고유명사 교정 = 위치별 후처리 사전 (STT 벤치마크 v2: 자모 Jaro-Winkler 0.85). 받아쓰기 사전을 넣은 엔진에는 안 씀"""
-    return postcorrect.correct(text_ko, terms) if needs_postcorrect() else text_ko
+    """고유명사 교정 = 자주 틀리는 표기 표(정확 일치) → 위치별 후처리 사전 (STT 벤치마크 v2: 자모 Jaro-Winkler 0.85).
+    받아쓰기 사전을 넣은 엔진에는 안 씀 (STT_POSTCORRECT)"""
+    if not needs_postcorrect():
+        return text_ko
+    return postcorrect.correct(postcorrect.apply_corrections(text_ko), terms)
 
 
 def card_ids(text: str) -> list[str]:
