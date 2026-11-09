@@ -9,7 +9,15 @@
 쓰는 곳: 받아쓰기 사전이 없거나 약한 엔진(Amazon Transcribe 등). Whisper·Qwen3-ASR·CLOVA 처럼 받아쓰기 사전을 넣은 엔진에는
 더하지 않음 (보고서 4.1). AI 담당 postcorrect.py 와 같은 규칙으로 다시 짠 것이라, 같은 입력으로 결과를 대조해 볼 것.
 """
+import json
+import logging
 import re
+from functools import lru_cache
+from pathlib import Path
+
+from app.settings import env
+
+log = logging.getLogger('gunggeum.stt')
 
 THRESHOLD = 0.85
 _JONG_EMPTY = 0
@@ -98,4 +106,39 @@ def correct(text: str, terms: list[str], threshold: float = THRESHOLD) -> str:
             i += n
         else:
             i += 1
+    return ' '.join(tokens)
+
+
+# ── 자주 틀리는 표기 → 정답 (정확 일치 표, 위치 무관) ──
+# 유사도로 못 잡는 오인식용 (예: '경위로' vs '경회루' 는 자모 Jaro-Winkler 0.80 < 0.85).
+# 파일: STT_CORRECTIONS_PATH (기본 api/data/stt_corrections.json), 형식 {"경위로": "경회루", ...}. "_" 로 시작하는 키는 주석.
+# 어절 앞부분이 표기와 같으면 그 부분만 바꾸고 뒤에 붙은 조사·어미는 그대로 ("경위로는" → "경회루는"). 긴 표기부터 맞춤.
+DEFAULT_CORRECTIONS = Path(__file__).resolve().parents[2] / 'data' / 'stt_corrections.json'
+
+
+@lru_cache(maxsize=4)
+def _load_corrections(path: str) -> tuple[tuple[str, str], ...]:
+    try:
+        data = json.loads(Path(path).read_text(encoding='utf-8'))
+        pairs = {str(k).strip(): str(v).strip() for k, v in data.items() if not str(k).startswith('_')}
+    except (OSError, ValueError, AttributeError):
+        log.exception('자주 틀리는 표기 표를 읽지 못함: %s (표 없이 진행)', path)
+        return ()
+    return tuple(sorted(((k, v) for k, v in pairs.items() if k and v and ' ' not in k), key=lambda kv: -len(kv[0])))
+
+
+def corrections() -> tuple[tuple[str, str], ...]:
+    return _load_corrections(env('STT_CORRECTIONS_PATH') or str(DEFAULT_CORRECTIONS))
+
+
+def apply_corrections(text: str, table: tuple[tuple[str, str], ...] | None = None) -> str:
+    table = corrections() if table is None else table
+    if not table:
+        return text
+    tokens = text.split(' ')
+    for i, tok in enumerate(tokens):
+        for wrong, right in table:
+            if tok.startswith(wrong):
+                tokens[i] = right + tok[len(wrong):]
+                break
     return ' '.join(tokens)
