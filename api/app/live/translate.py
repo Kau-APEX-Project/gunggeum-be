@@ -12,11 +12,16 @@ from app.settings import env
 log = logging.getLogger('gunggeum.translate')
 DEFAULT_TERMS = Path(__file__).resolve().parents[2] / 'data' / 'translate_terms.csv'
 HEAD = re.compile(r'[^0-9A-Za-z가-힣]*')  # 어절 앞 따옴표·괄호
+# 1글자 용어('왕')는 뒤가 조사이거나 어절이 거기서 끝날 때만 맞음 → '왕이'·'왕의' 는 바꾸고 '왕실'·'왕권'·'왕대비' 는 그대로
+# (cornch-k 리뷰 2026-11-10: 300문장에서 앞부분만 맞추면 틀리는 곳 12, 맞는 곳 2)
+PARTICLES = ('이', '가', '은', '는', '을', '를', '의', '와', '과', '도', '만', '에', '에서', '에게', '께', '께서',
+             '로', '으로', '이나', '나', '까지', '부터', '보다', '처럼', '이다', '입니다', '이었', '였')
+WORD = re.compile(r'[0-9A-Za-z가-힣]*')  # 용어 바로 뒤에 이어지는 글자 (문장부호 앞까지)
 
 
 @lru_cache(maxsize=4)
 def _load_glossary(path: str) -> dict[str, dict[str, str]]:
-    """용어집 CSV (ko,en,th) → {한국어 용어: {언어: 표기}}. 1글자·띄어쓰기 있는 용어는 뺌 (문장 속 아무 글자에나 걸려서)"""
+    """용어집 CSV (ko,en,th) → {한국어 용어: {언어: 표기}}. 띄어쓰기 있는 용어는 뺌. 1글자 용어는 _each_term 이 조사 앞에서만 맞춤"""
     try:
         with open(path, encoding='utf-8', newline='') as f:
             rows = list(csv.DictReader(f))
@@ -26,7 +31,7 @@ def _load_glossary(path: str) -> dict[str, dict[str, str]]:
     out = {}
     for r in rows:
         ko = (r.get('ko') or '').strip()
-        if len(ko) > 1 and ' ' not in ko:
+        if ko and ' ' not in ko:
             out[ko] = {k: (v or '').strip() for k, v in r.items() if k and k != 'ko'}
     return out
 
@@ -57,12 +62,22 @@ def glossary_terms() -> tuple[str, ...]:
     return tuple(sorted(glossary(), key=len, reverse=True))
 
 
+def _fits(body: str, term: str) -> bool:
+    """어절 body 가 용어로 시작하는지. 2글자 이상은 뒤에 무엇이 붙어도 되고, 1글자는 뒤가 조사이거나 비어 있을 때만"""
+    if not body.startswith(term):
+        return False
+    if len(term) > 1:
+        return True
+    rest = WORD.match(body, 1).group()  # '왕이.' → '이', '왕"은' → ''
+    return rest == '' or rest in PARTICLES
+
+
 def _each_term(text: str, terms):
     """어절마다 (앞 문장부호, 맞은 용어 또는 None, 나머지). 용어는 어절 시작(앞 따옴표·괄호 뒤)에서만, 뒤에는 조사·어미가 붙어도 됨"""
     for tok in text.split(' '):
         head = HEAD.match(tok).group()
         body = tok[len(head):]
-        term = next((t for t in terms if body.startswith(t)), None)
+        term = next((t for t in terms if _fits(body, t)), None)
         yield head, term, body[len(term):] if term else body
 
 

@@ -228,3 +228,25 @@ def test_notranslate_mode_is_default(monkeypatch):
     # 경복궁은 아직 용어집에 없음 (검토 1번: 왕·왕비·경복궁 추가는 AI 리포 용어집에서)
     assert sent[0] == ('<span translate="no">Geunjeongjeon</span>은 경복궁의 <span translate="no">Jeongjeon</span>입니다.', None)
     assert en == 'Geunjeongjeon (Throne Hall) is 경복궁의 Jeongjeon (main hall of a palace).'
+
+
+@pytest.mark.parametrize('ko, out', [
+    ('왕이 연회를 열었다', '<span translate="no">the king</span>이 연회를 열었다'),
+    ('왕의 침전', '<span translate="no">the king</span>의 침전'),
+    ('왕.', '<span translate="no">the king</span>.'),
+    ('"왕"은', '"<span translate="no">the king</span>"은'),
+    ('왕실과 왕권, 왕명, 왕위, 왕대비', '왕실과 왕권, 왕명, 왕위, 왕대비'),  # 1글자 용어는 조사 앞에서만
+    ('근정전실', '<span translate="no">Geunjeongjeon</span>실'),  # 2글자 이상은 그대로 (뒤에 무엇이 붙어도 됨)
+])
+def test_one_letter_term_only_before_particle(ko, out):
+    """cornch-k 리뷰 (2026-11-10): '왕 → the king' 을 넣어도 '왕실' 이 'the king실' 이 되지 않게"""
+    from app.live.translate import wrap_terms
+    table = {**TABLE, '왕': {'en': 'the king', 'th': ''}}
+    assert wrap_terms(ko, 'en', table)[0] == out
+
+
+def test_one_letter_terms_are_loaded(tmp_path):
+    from app.live.translate import _load_glossary
+    path = tmp_path / 't.csv'
+    path.write_text('ko,en,th\n왕,the king,\n근정전,Geunjeongjeon (Throne Hall),\n경복궁 중건,x,\n', encoding='utf-8')
+    assert set(_load_glossary(str(path))) == {'왕', '근정전'}  # 띄어 쓴 용어는 아직 뺌
