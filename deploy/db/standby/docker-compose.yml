@@ -1,0 +1,21 @@
+# 대기 DB (EC2 gunggeum-db-standby, AZ C, t4g.micro) — 기본 DB 의 스트리밍 복제본, 평소엔 읽기 전용
+#   처음 한 번: bash deploy/db/standby/setup_standby.sh <기본DB 사설 IP>   (pg_basebackup 으로 데이터 복사)
+#   그 뒤:      docker compose -f deploy/db/standby/docker-compose.yml up -d
+#   승격(기본 DB 장애 때): deploy/db/README.md 의 "장애 때 승격"
+name: gunggeum-standby
+services:
+  db:
+    image: pgvector/pgvector:pg17   # 기본 DB 와 같은 이미지·같은 메이저 버전이어야 복제됨
+    ports:
+      - "5432:5432"   # 승격 뒤 앱 서버가 접속. 보안 그룹이 앱 서버만 허용
+    volumes:
+      - data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gbg"]
+      interval: 10s
+      retries: 20
+    mem_limit: 700m   # t4g.micro(1GB)
+    restart: unless-stopped
+
+volumes:
+  data:

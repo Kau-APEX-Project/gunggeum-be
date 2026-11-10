@@ -1,0 +1,17 @@
+# EC2 앱 서버(기본 DB) 전용 덧붙임 파일. 로컬·데스크탑에서는 쓰지 않음.
+#   켜기: 서버 .env 에 COMPOSE_FILE=docker-compose.yml:docker-compose.aws.yml
+#   하는 일: 대기 DB(AZ C)가 스트리밍 복제로 붙을 수 있게 db 를 5432 로 열고(보안 그룹이 대기 DB 만 허용),
+#            복제 사용자 접속 규칙(deploy/db/pg_hba.conf)을 씀. 자세한 순서는 deploy/db/README.md
+services:
+  db:
+    command:
+      - postgres
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      # 대기 DB 가 꺼져 있어도(밤에 중지 등) 복제 슬롯 때문에 WAL 이 디스크를 다 채우지 않게 상한
+      - -c
+      - max_slot_wal_keep_size=2GB
+    ports:
+      - "${DB_REPL_BIND:-0.0.0.0}:5432:5432"
+    volumes:
+      - ./deploy/db/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro

@@ -10,7 +10,8 @@ x-app: &app
       GIT_SHA: ${GIT_SHA:-dev}
   env_file: .env
   environment:
-    DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-gbg}@db:5432/gbg   # 컨테이너 안에서는 db 로 접속
+    # 컨테이너 안에서는 db 로 접속. 대기 DB 승격 때만 .env 에 DB_HOST=<대기 DB 사설 IP> (deploy/db/README.md)
+    DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-gbg}@${DB_HOST:-db}:5432/gbg
     REDIS_URL: redis://redis:6379/0
   depends_on:
     db:
