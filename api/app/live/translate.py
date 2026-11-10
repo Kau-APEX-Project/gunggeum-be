@@ -163,8 +163,16 @@ def wrap_terms(text: str, lang: str, table: dict[str, dict[str, str]]) -> tuple[
 def unwrap_terms(text: str, marks: dict[str, str]) -> str:
     """번역문의 번역 제외 표시를 그 언어 카드 표기로 바꾸고 HTML 문자(&amp; 등)를 되돌림.
     Translate 가 표시를 없앴으면 남은 이름·토큰을 restore_terms 로 바꿈"""
-    if NO_TRANSLATE.search(text):
-        text = NO_TRANSLATE.sub(lambda m: marks.get(m.group(1), m.group(1)), text)
+    first = NO_TRANSLATE.search(text)
+    if first:
+        at_start = not re.search(r'[0-9A-Za-z\u0E00-\u0E7F가-힣]', text[:first.start()])
+
+        def put(m):
+            value = marks.get(m.group(1), m.group(1))
+            if at_start and m.start() == first.start() and value[:1].islower():  # 문장 첫머리 일반 단어('the queen') → 대문자
+                value = value[0].upper() + value[1:]
+            return value
+        text = NO_TRANSLATE.sub(put, text)
     else:
         text = restore_terms(text, marks)
     return html.unescape(text)

@@ -146,8 +146,8 @@ def test_substitute_mode_skips_terminology(monkeypatch):
     assert t.mode == 'substitute'
     run(t.translate('근정전은 경복궁의 정전입니다.', 'en'))
     th = run(t.translate('근정전은 경복궁의 정전입니다.', 'th'))  # 태국어는 GGT 토큰으로 보내고 되돌림
-    assert sent == [('Geunjeongjeon (Throne Hall)은 경복궁의 Jeongjeon (main hall of a palace)입니다.', None),
-                    ('GGT0은 경복궁의 GGT1입니다.', None)]
+    assert sent == [('Geunjeongjeon (Throne Hall)은 Gyeongbokgung Palace의 Jeongjeon (main hall of a palace)입니다.', None),
+                    ('GGT0은 경복궁의 GGT1입니다.', None)]  # 경복궁은 태국어 표기가 비어 있어 그대로
     assert th == 'คึนจองจอน (ท้องพระโรง)은 경복궁의 ชองจอน (ท้องพระโรงหลัก)입니다.'
     monkeypatch.setenv('TRANSLATE_SUBSTITUTE_LANGS', 'en,th')
     sent.clear()
@@ -225,9 +225,10 @@ def test_notranslate_mode_is_default(monkeypatch):
     t = AwsTranslator(C())
     assert t.mode == 'notranslate'
     en = run(t.translate('근정전은 경복궁의 정전입니다.', 'en'))
-    # 경복궁은 아직 용어집에 없음 (검토 1번: 왕·왕비·경복궁 추가는 AI 리포 용어집에서)
-    assert sent[0] == ('<span translate="no">Geunjeongjeon</span>은 경복궁의 <span translate="no">Jeongjeon</span>입니다.', None)
-    assert en == 'Geunjeongjeon (Throne Hall) is 경복궁의 Jeongjeon (main hall of a palace).'
+    # 경복궁은 괄호 풀이 없는 일반 단어로 용어집에 있음 (AI 리포 PR #3)
+    assert sent[0] == ('<span translate="no">Geunjeongjeon</span>은 <span translate="no">Gyeongbokgung Palace</span>의 '
+                       '<span translate="no">Jeongjeon</span>입니다.', None)
+    assert en == 'Geunjeongjeon (Throne Hall) is Gyeongbokgung Palace의 Jeongjeon (main hall of a palace).'
 
 
 @pytest.mark.parametrize('ko, out', [
@@ -250,3 +251,12 @@ def test_one_letter_terms_are_loaded(tmp_path):
     path = tmp_path / 't.csv'
     path.write_text('ko,en,th\n왕,the king,\n근정전,Geunjeongjeon (Throne Hall),\n경복궁 중건,x,\n', encoding='utf-8')
     assert set(_load_glossary(str(path))) == {'왕', '근정전'}  # 띄어 쓴 용어는 아직 뺌
+
+
+def test_unwrap_capitalizes_sentence_start():
+    """'왕비는 …' → 'the queen lived …' 가 아니라 'The queen lived …'"""
+    from app.live.translate import unwrap_terms
+    marks = {'the queen': 'the queen'}
+    assert unwrap_terms('<span translate="no">the queen</span> lived here.', marks) == 'The queen lived here.'
+    assert unwrap_terms('"<span translate="no">the queen</span>" lived', marks) == '"The queen" lived'
+    assert unwrap_terms('Later <span translate="no">the queen</span> lived', marks) == 'Later the queen lived'
