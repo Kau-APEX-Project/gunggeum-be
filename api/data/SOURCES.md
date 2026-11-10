@@ -5,7 +5,7 @@
 | `translate_terms.csv` | `Kau-APEX-Project/gunggeum-ai-stt` `gunggeum_stt/data/translate_terms.csv` (커밋 `52c433c`, 2026-11-04). 전각 71곳·용어 231개 카드 이름 ko→en·th 329개. 원본 표기는 그 리포의 `경복궁_전각.xlsx`·`경복궁_용어.xlsx` | 원본 리포에서 `python -m gunggeum_stt.build_glossary` 로 만든 파일을 그대로 복사 (여기서 고치지 않음) |
 | `stt_hints.json` | 같은 리포 `gunggeum_stt/data/hints_by_location.json` (37개 해설 위치) + `Kau-APEX-Project/gunggeum-ai-llm-gps` `visit/data/pois.json` (커밋 `c092daa`, 71곳) | `python scripts/convert_stt_hints.py <hints_by_location.json> <pois.json>` |
 | `stt_hints.example.json` | 예시 2곳 (테스트·개발용) | 손으로 작성 |
-| `stt_corrections.json` | 자주 틀리는 표기 → 정답 (AWS Transcribe 시험 2026-11-10) | 손으로 작성 |
+| `stt_corrections.json` | 자주 틀리는 표기 → 정답 (AWS Transcribe 시험 2026-11-10, 11/8 경복궁 현장 녹음 — 안기겸 검토 2026-11-10) | 손으로 작성 |
 
 용어집 CSV 를 AWS 에 등록: `scripts/aws/setup_stt_vocab_and_terms.sh` (이름 기본 `gungeum-ko`, 원본 리포 `python -m gunggeum_stt.glossary --create-terminology` 와 같은 이름·같은 내용).
 
