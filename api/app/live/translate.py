@@ -173,6 +173,7 @@ def unwrap_terms(text: str, marks: dict[str, str]) -> str:
                 value = value[0].upper() + value[1:]
             return value
         text = NO_TRANSLATE.sub(put, text)
+        text = re.sub(r'\b([Tt]he) the\b', r'\1', text)  # Translate 가 'the' 를 붙인 뒤 'the queen' 이 들어간 경우
     else:
         text = restore_terms(text, marks)
     return html.unescape(text)

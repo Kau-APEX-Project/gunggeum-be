@@ -260,3 +260,4 @@ def test_unwrap_capitalizes_sentence_start():
     assert unwrap_terms('<span translate="no">the queen</span> lived here.', marks) == 'The queen lived here.'
     assert unwrap_terms('"<span translate="no">the queen</span>" lived', marks) == '"The queen" lived'
     assert unwrap_terms('Later <span translate="no">the queen</span> lived', marks) == 'Later the queen lived'
+    assert unwrap_terms('the king and the <span translate="no">the queen</span>', marks) == 'the king and the queen'
