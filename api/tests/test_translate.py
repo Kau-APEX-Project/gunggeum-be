@@ -253,6 +253,20 @@ def test_one_letter_terms_are_loaded(tmp_path):
     assert set(_load_glossary(str(path))) == {'왕', '근정전'}  # 띄어 쓴 용어는 아직 뺌
 
 
+@pytest.mark.parametrize('ko, out', [
+    ('왕이 연회를 열었다', 'The king이 연회를 열었다'),
+    ('왕의 명령', 'The king의 명령'),
+    ('왕실과 왕권', '왕실과 왕권'),
+])
+def test_real_glossary_has_king(ko, out):
+    """AI 리포 용어집(gunggeum-ai-stt PR #3, 332개)의 '왕 → the king' 이 실제 파일에서 동작하는지"""
+    from app.live.translate import DEFAULT_TERMS, _load_glossary, unwrap_terms, wrap_terms
+    table = _load_glossary(str(DEFAULT_TERMS))
+    assert table['왕']['en'] == 'the king'
+    wrapped, marks = wrap_terms(ko, 'en', table)
+    assert unwrap_terms(wrapped, marks) == out
+
+
 def test_unwrap_capitalizes_sentence_start():
     """'왕비는 …' → 'the queen lived …' 가 아니라 'The queen lived …'"""
     from app.live.translate import unwrap_terms
