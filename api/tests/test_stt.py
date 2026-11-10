@@ -192,6 +192,13 @@ def test_corrections_table(heard, fixed):
     assert postcorrect.apply_corrections(heard, (('경위로', '경회루'),)) == fixed
 
 
+def test_default_corrections_file():
+    """기본 표 (api/data/stt_corrections.json): 현장 녹음에서 유사도 보정이 못 잡은 오인식"""
+    table = postcorrect._load_corrections(str(postcorrect.DEFAULT_CORRECTIONS))
+    text = '경위로를 지나 통회문과 흑미문, 통계석이 보입니다'
+    assert postcorrect.apply_corrections(text, table) == '경회루를 지나 홍예문과 흥례문, 품계석이 보입니다'
+
+
 def test_corrections_file_and_longest_first(tmp_path, monkeypatch):
     path = tmp_path / 'c.json'
     path.write_text(json.dumps({'_note': 'x', '경위': '틀림', '경위로': '경회루', '띄어 쓴 키': '무시'}, ensure_ascii=False))
