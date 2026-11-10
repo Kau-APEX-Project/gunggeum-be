@@ -131,8 +131,8 @@ def test_substitute_terms(ko, lang, out):
     assert substitute_terms(ko, lang, TABLE) == out
 
 
-def test_substitute_mode_is_default_and_skips_terminology(monkeypatch):
-    monkeypatch.delenv('TRANSLATE_TERM_MODE')
+def test_substitute_mode_skips_terminology(monkeypatch):
+    monkeypatch.setenv('TRANSLATE_TERM_MODE', 'substitute')
     monkeypatch.delenv('TRANSLATE_SUBSTITUTE_LANGS', raising=False)
     monkeypatch.delenv('TRANSLATE_TERMS_PATH', raising=False)
     monkeypatch.setenv('TRANSLATE_TERMINOLOGY', 'gungeum-ko')
@@ -185,3 +185,46 @@ def test_placeholder_token_and_word_boundary():
     _, marks = placeholder_terms('근정전은 정전입니다', 'th', table, style='roman')
     assert restore_terms('Geunjeongjeon is Jeongjeon', marks) == f"{TABLE['근정전']['th']} is ชองจอน"
     assert placeholder_terms('정전', 'ja', table) == ('정전', {})  # 그 언어 표기가 없으면 그대로
+
+
+def test_bundle_terms_are_left_alone():
+    """묶음 표기 (영문 이름에 / 나 and) 는 바꿔 넣지 않음 (안기겸 검토 2026-11-10)"""
+    from app.live.translate import is_bundle, placeholder_terms, substitute_terms, wrap_terms
+    assert is_bundle('Changgeon / Junggeon / Jaegeon / Bogwon / Sosil (Foundation / Reconstruction)')
+    assert is_bundle('Gukbo and Bomul (National Treasure and Treasure)')
+    assert not is_bundle('Geunjeongjeon (Throne Hall)')
+    assert not is_bundle('Seokjo (Stone Lantern and Base)')  # 괄호 설명 속 and 는 상관없음
+    table = {**TABLE, '복원': {'en': 'Changgeon / Junggeon / Bogwon (Foundation / Restoration)', 'th': 'x'}}
+    assert substitute_terms('근정전을 복원했습니다', 'en', table) == 'Geunjeongjeon (Throne Hall)을 복원했습니다'
+    assert placeholder_terms('복원했습니다', 'th', table) == ('복원했습니다', {})
+    assert wrap_terms('복원했습니다', 'en', table) == ('복원했습니다', {})
+
+
+def test_wrap_and_unwrap_terms():
+    from app.live.translate import unwrap_terms, wrap_terms
+    text, marks = wrap_terms('근정전은 경회루와 근정전', 'th', TABLE)
+    assert text == ('<span translate="no">Geunjeongjeon</span>은 <span translate="no">Gyeonghoeru</span>와 '
+                    '<span translate="no">Geunjeongjeon</span>')
+    assert marks == {'Geunjeongjeon': TABLE['근정전']['th'], 'Gyeonghoeru': TABLE['경회루']['th']}
+    out = unwrap_terms('<span translate="no">Geunjeongjeon</span> &amp; <SPAN translate=\'no\'> Gyeonghoeru </SPAN>', marks)
+    assert out == f"{TABLE['근정전']['th']} & {TABLE['경회루']['th']}"
+    # Translate 가 표시를 없앴으면 남은 이름으로 되돌림
+    assert unwrap_terms('Geunjeongjeon is big', marks) == f"{TABLE['근정전']['th']} is big"
+    assert wrap_terms('정전', 'th', TABLE) == ('정전', {})  # 그 언어 표기가 없으면 그대로
+
+
+def test_notranslate_mode_is_default(monkeypatch):
+    monkeypatch.delenv('TRANSLATE_TERM_MODE')
+    monkeypatch.delenv('TRANSLATE_TERMS_PATH', raising=False)
+    sent = []
+
+    class C:
+        def translate_text(self, **kw):
+            sent.append((kw['Text'], kw.get('TerminologyNames')))
+            return {'TranslatedText': kw['Text'].replace('은', ' is').replace('입니다.', '.')}
+    t = AwsTranslator(C())
+    assert t.mode == 'notranslate'
+    en = run(t.translate('근정전은 경복궁의 정전입니다.', 'en'))
+    # 경복궁은 아직 용어집에 없음 (검토 1번: 왕·왕비·경복궁 추가는 AI 리포 용어집에서)
+    assert sent[0] == ('<span translate="no">Geunjeongjeon</span>은 경복궁의 <span translate="no">Jeongjeon</span>입니다.', None)
+    assert en == 'Geunjeongjeon (Throne Hall) is 경복궁의 Jeongjeon (main hall of a palace).'

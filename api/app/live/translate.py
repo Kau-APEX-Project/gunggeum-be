@@ -1,6 +1,7 @@
 """자막 번역. TRANSLATE_PROVIDER=aws (Amazon Translate, 기본) | echo (개발용: 한국어 그대로)"""
 import asyncio
 import csv
+import html
 import logging
 import re
 from functools import lru_cache
@@ -34,6 +35,23 @@ def glossary() -> dict[str, dict[str, str]]:
     return _load_glossary(env('TRANSLATE_TERMS_PATH') or str(DEFAULT_TERMS))
 
 
+def roman_name(en: str) -> str:
+    """영어 카드 표기의 괄호 앞 이름: 'Geunjeongjeon (Throne Hall)' → 'Geunjeongjeon'"""
+    return re.sub(r'\s*\(.*$', '', en or '').strip()
+
+
+def is_bundle(en: str) -> bool:
+    """여러 용어를 한 줄로 묶은 표기 ('Changgeon / Junggeon / …', 'Gukbo and Bomul (…)').
+    자막에 그대로 넣으면 '복원했습니다' 가 묶음 전체로 나와서 바꿔 넣지 않음 (안기겸 검토 2026-11-10: 영문 이름에 / 나 and)"""
+    name = roman_name(en)
+    return '/' in name or bool(re.search(r'\band\b', name))
+
+
+def term_table(lang: str, table: dict[str, dict[str, str]]) -> list[str]:
+    """그 언어 표기가 있고 묶음 표기가 아닌 한국어 용어, 긴 것부터"""
+    return sorted((k for k, v in table.items() if v.get(lang) and not is_bundle(v.get('en', ''))), key=len, reverse=True)
+
+
 def glossary_terms() -> tuple[str, ...]:
     """한국어 용어, 긴 것부터 ('근정전' 이 '정전' 보다 먼저 맞게)"""
     return tuple(sorted(glossary(), key=len, reverse=True))
@@ -63,7 +81,7 @@ def substitute_terms(text: str, lang: str, table: dict[str, dict[str, str]]) -> 
     → 자막 카드 링크(cards.link_names)가 맞음. 그 언어 표기가 비어 있는 용어는 바꾸지 않음 (2026-11-10 서버 비교 시험)"""
     if not table:
         return text
-    terms = sorted((k for k, v in table.items() if v.get(lang)), key=len, reverse=True)
+    terms = term_table(lang, table)
     return ' '.join(head + (table[term][lang] + rest if term else rest) for head, term, rest in _each_term(text, terms))
 
 
@@ -75,14 +93,14 @@ def placeholder_terms(text: str, lang: str, table: dict[str, dict[str, str]], st
     그 언어 표기가 빈 용어는 그대로 둠. 돌려주는 표: {자리표시자: 그 언어 표기}"""
     if not table:
         return text, {}
-    terms = sorted((k for k, v in table.items() if v.get(lang)), key=len, reverse=True)
+    terms = term_table(lang, table)
     marks: dict[str, str] = {}
     by_term: dict[str, str] = {}
     out = []
     for head, term, rest in _each_term(text, terms):
         if term:
             if term not in by_term:
-                roman = re.sub(r'\s*\(.*$', '', table[term].get('en') or '').strip()
+                roman = roman_name(table[term].get('en'))
                 mark = roman if style == 'roman' and roman and roman not in marks else f'GGT{len(marks)}'
                 by_term[term] = mark
                 marks[mark] = table[term][lang]
@@ -99,6 +117,44 @@ def restore_terms(text: str, marks: dict[str, str]) -> str:
     return text
 
 
+NO_TRANSLATE = re.compile(r'<span\s+translate\s*=\s*["\']no["\']\s*>\s*(.*?)\s*</span>', re.I | re.S)
+
+
+def wrap_terms(text: str, lang: str, table: dict[str, dict[str, str]]) -> tuple[str, dict[str, str]]:
+    """TRANSLATE_TERM_MODE=notranslate (기본). 용어를 로마자 이름만 넣고 번역 제외 표시로 감쌈
+    ('근정전은' → '<span translate="no">Geunjeongjeon</span>은'). Translate 는 감싼 부분을 건드리지 않음.
+    번역 뒤 unwrap_terms 가 그 언어 카드 표기로 바꿈 → 영어·태국어가 같은 방식, 카드 링크도 맞음.
+    안기겸 검토(2026-11-10, 300문장 772항목): 괄호 설명까지 넣기 84.1%, 이름만 넣고 뒤에 붙이기 94.2%, 번역 제외 표시 99.2%.
+    로마자 이름이 없거나 다른 용어와 겹치면 GGT 토큰. 돌려주는 표: {감싼 글자: 그 언어 표기}"""
+    if not table:
+        return text, {}
+    terms = term_table(lang, table)
+    marks: dict[str, str] = {}
+    by_term: dict[str, str] = {}
+    out = []
+    for head, term, rest in _each_term(text, terms):
+        if term:
+            if term not in by_term:
+                name = roman_name(table[term].get('en'))
+                mark = name if name and name not in marks else f'GGT{len(marks)}'
+                by_term[term] = mark
+                marks[mark] = table[term][lang]
+            out.append(f'{head}<span translate="no">{by_term[term]}</span>{rest}')
+        else:
+            out.append(head + rest)
+    return ' '.join(out), marks
+
+
+def unwrap_terms(text: str, marks: dict[str, str]) -> str:
+    """번역문의 번역 제외 표시를 그 언어 카드 표기로 바꾸고 HTML 문자(&amp; 등)를 되돌림.
+    Translate 가 표시를 없앴으면 남은 이름·토큰을 restore_terms 로 바꿈"""
+    if NO_TRANSLATE.search(text):
+        text = NO_TRANSLATE.sub(lambda m: marks.get(m.group(1), m.group(1)), text)
+    else:
+        text = restore_terms(text, marks)
+    return html.unescape(text)
+
+
 class EchoTranslator:
     """키 없이 흐름만 확인할 때. 번역하지 않고 한국어를 그대로 돌려줌"""
 
@@ -113,7 +169,8 @@ def is_missing_terminology(e: Exception) -> bool:
 
 class AwsTranslator:
     """Amazon Translate. 전각명·궁궐 용어 표기 고정 방식 TRANSLATE_TERM_MODE:
-      substitute (기본)  번역 전에 용어를 그 언어의 카드 표기로 바꿔 넣고 용어집 없이 번역
+      notranslate (기본) 로마자 이름을 번역 제외 표시로 감싸 번역한 뒤 그 언어의 카드 표기로 바꿈 (모든 언어 같은 방식)
+      substitute         번역 전에 용어를 그 언어의 카드 표기로 바꿔 넣고 용어집 없이 번역
       terminology        Custom Terminology (TRANSLATE_TERMINOLOGY=이름) + 용어 뒤 조사 띄우기
     용어집은 요청 하나에 하나만 받으므로 여러 개를 적으면 첫 번째만 씀.
     용어집이 없으면(ResourceNotFound) 용어집 없이 다시 번역해 자막이 빠지지 않게 하고, 그 뒤로는 용어집을 빼고 부름."""
@@ -127,10 +184,10 @@ class AwsTranslator:
         if len(names) > 1:
             log.warning('TRANSLATE_TERMINOLOGY 는 하나만 쓸 수 있어 첫 번째(%s)만 씀', names[0])
         self.terminology: str | None = names[0] if names else None
-        self.mode = env('TRANSLATE_TERM_MODE', 'substitute').strip().lower() or 'substitute'
-        if self.mode not in ('substitute', 'terminology'):
-            log.warning('TRANSLATE_TERM_MODE=%s 는 모름 → substitute', self.mode)
-            self.mode = 'substitute'
+        self.mode = env('TRANSLATE_TERM_MODE', 'notranslate').strip().lower() or 'notranslate'
+        if self.mode not in ('notranslate', 'substitute', 'terminology'):
+            log.warning('TRANSLATE_TERM_MODE=%s 는 모름 → notranslate', self.mode)
+            self.mode = 'notranslate'
         # 카드 표기를 그대로 넣는 언어. 태국어는 원문에 태국 문자를 넣으면 Translate 가 지워 버림 ("() เป็น ()", 2026-11-10 서버 시험)
         self.substitute_langs = {x.strip() for x in env('TRANSLATE_SUBSTITUTE_LANGS', 'en').split(',') if x.strip()}
         # 그 밖의 언어는 자리표시자로 번역한 뒤 되돌림: token (기본) | roman
@@ -147,6 +204,9 @@ class AwsTranslator:
         return res['TranslatedText']
 
     async def translate(self, text: str, lang: str) -> str:
+        if self.mode == 'notranslate':
+            text, marks = wrap_terms(text, lang, glossary())
+            return unwrap_terms(await self._call(text, lang, None), marks)
         if self.mode == 'substitute':
             if lang in self.substitute_langs:
                 return await self._call(substitute_terms(text, lang, glossary()), lang, None)
