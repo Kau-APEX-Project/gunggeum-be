@@ -1,0 +1,8 @@
+[Unit]
+Description=gunggeum DB daily backup to S3
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/gunggeum-be/deploy/db/backup_to_s3.sh
