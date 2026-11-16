@@ -81,18 +81,21 @@ class Core:
                     self._llm = (ask, ask.name_keys(self.col), course.Planner(self.col))
         return self._llm
 
-    def ask(self, question: str, language: str | None = None) -> dict:
-        ask, names, _ = self.llm()
+    def ask(self, question: str, language: str | None = None, history=None, here=None, nearest=None) -> dict:
+        """history·here·nearest 는 앱이 보낸 값 그대로 (형식 검사는 ask.reply 가 함).
+        planner 를 넘겨야 질문 칸의 코스 요청("40분 코스 짜줘")이 action.course 로 옴"""
+        ask, names, planner = self.llm()
         with answer_in(language):
-            return to_code(ask.reply(self.col, names, question)[0])
+            return to_code(ask.reply(self.col, names, question, history or (), here, planner, nearest)[0])
 
     def card(self, card_id: str) -> dict | None:
         return self._cards.card(self.col, card_id)
 
-    def course(self, request: str, language: str | None = None) -> dict:
+    def course(self, request: str, language: str | None = None, here=None) -> dict:
+        """here = 출발 기준 POI id (라우트가 nearest or here 로 넘김). 모르는 id 면 Planner 가 광화문 출발"""
         _, _, planner = self.llm()
         with answer_in(language):
-            return to_code(planner.make(request))
+            return to_code(planner.make(request, here=here))
 
 
 _core: Core | None = None

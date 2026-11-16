@@ -9,20 +9,31 @@ from app.main import app
 class FakeCore:
     def __init__(self):
         self.asked, self.requested = [], []
+        self.context, self.course_here = [], []  # ask 의 (history, here, nearest) · course 의 출발 기준
 
-    def ask(self, question, language=None):
+    def ask(self, question, language=None, history=None, here=None, nearest=None):
         self.asked.append((question, language))
+        self.context.append((history, here, nearest))
         if 'boom' in question:
             raise RuntimeError('OpenAI 키 없음 sk-secret')
+        if '코스' in question:  # 팀 로직이 코스 요청으로 판정한 경우의 응답 모양 (llm-gps API.md §2)
+            return {'answer': '왕비 이야기 코스입니다.', 'language': 'ko',
+                    'action': {'type': 'course', 'course': {'minutes': 40, 'start': 'place:gyotaejeon',
+                                                            'stops': [{'id': 'place:gyotaejeon', 'stayMin': 8}]}}}
         return {'answer': '[강녕전](card:b-163)은 왕의 침전입니다.', 'language': language or 'ko', 'action': None}
 
     def card(self, card_id):
         return {'id': card_id, 'type': 'building', 'name': '근정전'} if card_id == 'b-160' else None
 
-    def course(self, request, language=None):
+    def course(self, request, language=None, here=None):
         self.requested.append((request, language))
+        self.course_here.append(here)
+        if 'one minute' in request:  # 시간 안에 다녀올 곳이 없으면 stops 가 빈 배열
+            return {'answer': 'There is not enough time.', 'language': 'en',
+                    'course': {'minutes': 1, 'start': 'place:gwanghwamun-gate', 'stops': []}}
         return {'answer': '...', 'language': 'en',
-                'course': {'minutes': 30, 'stops': [{'id': 'place:gyotaejeon', 'stayMin': 8}]}}
+                'course': {'minutes': 30, 'start': 'place:gwanghwamun-gate',
+                           'stops': [{'id': 'place:gyotaejeon', 'stayMin': 8}]}}
 
 
 @pytest.fixture
@@ -55,6 +66,33 @@ def test_ask_language_field(client, fake):
     r = client.post('/api/ask', json={'question': '강녕전이 뭐야?', 'language': 'th'})
     assert r.status_code == 200 and fake.asked == [('강녕전이 뭐야?', 'th')]
     assert client.post('/api/ask', json={'question': 'hi', 'language': 'English'}).status_code == 400
+
+
+def test_ask_context_fields_pass_through(client, fake):
+    history = [{'question': '경회루가 뭐야?', 'answer': '[경회루](card:b-170)는 연회 장소입니다.'}]
+    r = client.post('/api/ask', json={'question': '거기는 누가 썼어?', 'history': history,
+                                      'here': 'place:gyeonghoeru', 'nearest': 'place:gyeonghoeru'})
+    assert r.status_code == 200
+    assert fake.context == [(history, 'place:gyeonghoeru', 'place:gyeonghoeru')]
+
+
+def test_ask_without_context_fields_is_same_as_before(client, fake):
+    client.post('/api/ask', json={'question': '강녕전이 뭐야?'})
+    assert fake.context == [(None, None, None)]
+
+
+def test_ask_odd_context_values_are_not_400(client, fake):
+    # 형식 검사는 팀 로직(ask.reply)이 함: 틀린 history 항목은 버리고, 모르는 here 는 무시 → BE 는 거절하지 않고 그대로 넘김
+    r = client.post('/api/ask', json={'question': '여기 뭐야?', 'history': 'oops', 'here': 123, 'nearest': ['x']})
+    assert r.status_code == 200 and fake.context == [('oops', 123, ['x'])]
+
+
+def test_ask_course_action_passes_through(client):
+    r = client.post('/api/ask', json={'question': '40분 코스 짜줘'})
+    assert r.status_code == 200
+    action = r.json()['action']
+    assert action['type'] == 'course' and action['course']['start'] == 'place:gyotaejeon'
+    assert action['course']['stops'] == [{'id': 'place:gyotaejeon', 'stayMin': 8}]
 
 
 def test_ask_over_300_chars_is_400(client, fake):
@@ -100,7 +138,21 @@ def test_course_ok(client, fake):
     assert r.status_code == 200
     assert r.json()['course']['stops'][0] == {'id': 'place:gyotaejeon', 'stayMin': 8}
     assert fake.requested == [('a quiet 30-minute walk', None)]
-    assert r.json()['language'] == 'en' 
+    assert r.json()['language'] == 'en'
+    assert r.json()['course']['start'] == 'place:gwanghwamun-gate'
+    assert fake.course_here == [None]  # 위치를 안 보내면 지금과 같이 (팀 로직이 광화문 출발)
+
+
+def test_course_start_uses_nearest_then_here(client, fake):
+    client.post('/api/course', json={'request': '40분', 'nearest': 'place:gyotaejeon', 'here': 'place:geunjeongjeon'})
+    client.post('/api/course', json={'request': '40분', 'here': 'place:geunjeongjeon'})
+    client.post('/api/course', json={'request': '40분', 'nearest': None})
+    assert fake.course_here == ['place:gyotaejeon', 'place:geunjeongjeon', None]
+
+
+def test_course_empty_stops_passes_through(client):
+    r = client.post('/api/course', json={'request': 'one minute tour'})
+    assert r.status_code == 200 and r.json()['course']['stops'] == [] and r.json()['answer']
 
 
 def test_course_empty_is_400(client):
