@@ -6,7 +6,7 @@
 |---|---|
 | 저장소 | `Kau-APEX-Project/gunggeum-ai-llm-gps` |
 | 경로 | `server/` (+ `db/` → 이 리포의 `db/`) |
-| 커밋 | `fd98149bf145124f0c48f051989ece6c8d393e22` (2026-11-16, PR #4 `fix/ask-here` 브랜치 끝 — 머지 전. 머지되면 머지 커밋으로 갱신) |
+| 커밋 | `c4afdd376a87b895e1e49f5ab081c7db28f8edb7` (2026-11-17, PR #4 머지 커밋. `server/`·`db/` 는 PR #4 브랜치 끝 `fd98149` 과 같음) |
 | 이전 | `Kau-APEX-Project/gunggeum` `deploy/server/` `0c7d687` (2026-10-23) |
 | 담당 | 박윤서 (로직), 김병진 (HTTP 서버) |
 
