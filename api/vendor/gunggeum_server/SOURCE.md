@@ -6,7 +6,7 @@
 |---|---|
 | 저장소 | `Kau-APEX-Project/gunggeum-ai-llm-gps` |
 | 경로 | `server/` (+ `db/` → 이 리포의 `db/`) |
-| 커밋 | `c4afdd376a87b895e1e49f5ab081c7db28f8edb7` (2026-11-17, PR #4 머지 커밋. `server/`·`db/` 는 PR #4 브랜치 끝 `fd98149` 과 같음) |
+| 커밋 | `5f3c359417a0c1f01f64a87556ed29380387b996` (2026-11-18, PR #5 머지 커밋. PR #4 머지 커밋 `c4afdd3` 이후 바뀐 파일은 `server/course.py` 하나) |
 | 이전 | `Kau-APEX-Project/gunggeum` `deploy/server/` `0c7d687` (2026-10-23) |
 | 담당 | 박윤서 (로직), 김병진 (HTTP 서버) |
 
