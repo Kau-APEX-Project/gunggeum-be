@@ -332,6 +332,9 @@ def test_add_ui(ko, out):
 @pytest.mark.parametrize('ko, out', [
     ('2026. 8. 12.(수) 오후 2시부로', '2026년 8월 12일(수) 오후 2시부로'),
     ('2026.12.1 휴관', '2026년 12월 1일 휴관'),
+    ('2026. 12. 8.(화) ~ 12. 19.(토)', '2026년 12월 8일(화) ~ 12월 19일(토)'),  # 기간 끝 (N25)
+    ('2026.12.8~12.19 휴관', '2026년 12월 8일~12월 19일 휴관'),
+    ('09:00 ~ 17:00', '09:00 ~ 17:00'),
     ('2026. 13. 1.', '2026. 13. 1.'),            # 날짜가 아님
     ('전화 02-3700-3900', '전화 02-3700-3900'),
 ])
@@ -427,3 +430,23 @@ def test_subtitles_skip_notice_steps(notranslate):
 def test_echo_accepts_notice():
     from app.live.translate import EchoTranslator
     assert run(EchoTranslator().translate('안내', 'en', notice=True)) == '안내'
+
+
+PAREN_TABLE = {**TABLE, '사정전': {'en': 'Sajeongjeon (Royal Council Hall)', 'th': 'ซาจองจอน (ท้องพระโรงทรงงาน)'},
+               '편전': {'en': 'Pyeonjeon (Royal Council Hall)', 'th': 'พยอนจอน (ท้องพระโรงว่าราชการ)'},
+               '월대': {'en': 'Woldae (Raised Platform)', 'th': 'วอลแด'}}
+
+
+@pytest.mark.parametrize('ko, lang, out', [
+    ('사정전(편전)은 왕의 집무실', 'en', 'Sajeongjeon (Royal Council Hall) (Pyeonjeon)은 왕의 집무실'),
+    ('사정전(편전)은', 'th', 'ซาจองจอน (ท้องพระโรงทรงงาน) (พยอนจอน)은'),
+    ('사정전(편전). 편전은', 'en', 'Sajeongjeon (Royal Council Hall) (Pyeonjeon). Pyeonjeon (Royal Council Hall)은'),  # 밖의 편전은 카드 표기
+    ('근정전 월대(근정전 앞 계단 구역)', 'en',
+     'Geunjeongjeon (Throne Hall) Woldae (Raised Platform)(Geunjeongjeon (Throne Hall) 앞 계단 구역)'),  # 괄호 안에 다른 말 → 그대로
+    ('사정전(편전이)', 'en', 'Sajeongjeon (Royal Council Hall)(Pyeonjeon (Royal Council Hall)이)'),  # 괄호 안이 용어 하나가 아님
+])
+def test_term_in_paren_after_term_uses_name_only(ko, lang, out):
+    """안기겸 리뷰 (2026-11-22): 용어 바로 뒤 괄호 안에 용어 하나만 있으면 괄호 안은 이름만"""
+    from app.live.translate import unwrap_terms, wrap_terms
+    wrapped, marks = wrap_terms(ko, lang, PAREN_TABLE)
+    assert unwrap_terms(wrapped, marks) == out

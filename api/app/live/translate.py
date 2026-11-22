@@ -143,6 +143,20 @@ def restore_terms(text: str, marks: dict[str, str]) -> str:
 NO_TRANSLATE = re.compile(r'<span\s+translate\s*=\s*["\']no["\']\s*>\s*(.*?)\s*</span>', re.I | re.S)
 
 
+def _paren_inner(items) -> set[int]:
+    """용어 바로 뒤 괄호 안에 용어 하나만 있는 곳('사정전(편전)')의 안쪽 덩어리 번호.
+    둘 다 카드 표기로 바꾸면 'Sajeongjeon (Royal Council Hall)(Pyeonjeon (Royal Council Hall))' 처럼 괄호가 겹침.
+    괄호 안에 다른 말이 함께 있으면('근정전 월대(근정전 앞 계단 구역)') 해당 없음 (안기겸 리뷰 2026-11-22)"""
+    out = set()
+    for i in range(1, len(items)):
+        head, term, rest = items[i]
+        _, before, before_rest = items[i - 1]
+        nxt = items[i + 1][0] if i + 1 < len(items) else ''
+        if term and not rest and before and not before_rest and head.strip() == '(' and nxt.startswith(')'):
+            out.add(i)
+    return out
+
+
 def notice_terms(terms: list[str]) -> list[str]:
     """공지 번역에서 감쌀 용어 (일반 낱말과 같은 용어 뺌)"""
     return [t for t in terms if t not in NOTICE_PLAIN_WORDS]
@@ -160,12 +174,22 @@ def wrap_terms(text: str, lang: str, table: dict[str, dict[str, str]], notice: b
     terms = term_table(lang, table)
     if notice:
         terms = notice_terms(terms)
+    items = list(_each_term(text, terms))
+    inner = _paren_inner(items)
+    normal = {t for i, (_, t, _) in enumerate(items) if t and i not in inner}
     marks: dict[str, str] = {}
     by_term: dict[str, str] = {}
     out = []
-    for head, term, rest in _each_term(text, terms):
+    for i, (head, term, rest) in enumerate(items):
         if term and notice and VERB.match(rest):  # 동사로 쓰인 용어('대비해', '조정됩니다')는 그대로
             out.append(head + term + rest)
+            continue
+        if term and i in inner:  # '사정전(편전)' 의 편전 → 괄호 안은 그 언어 이름만 ('(Pyeonjeon)'), 바깥 괄호와 띄움
+            label = roman_name(table[term][lang]) or table[term][lang]
+            name = roman_name(table[term].get('en'))
+            mark = name if name and name not in marks and term not in normal else f'GGT{len(marks)}'
+            marks[mark] = label
+            out.append(f'{" (" if head == "(" else head}<span translate="no">{mark}</span>{rest}')
             continue
         if term:
             if term not in by_term:
@@ -236,18 +260,25 @@ def extra_years(src: str, out: str, marks: dict[str, str]) -> bool:
 
 # ---------- 공지만 하는 전처리 (이슈 #16 3·4·5번) ----------
 DOT_DATE = re.compile(r'(?<!\d)(\d{4})\.\s?(\d{1,2})\.\s?(\d{1,2})(?!\d)\.?')
+RANGE_END = re.compile(r'([~∼〜]\s*)(\d{1,2})\.\s?(\d{1,2})(?![\d:])\.?')  # 기간 끝 'M. D.' (연도 없음)
 ANGLE = re.compile(r'<([^<>\n]+)>')
 SQUARE = re.compile(r'\[([^\[\]\n]+)\]')
 
 
 def korean_dates(text: str) -> str:
-    """'2026. 12. 1.(화)' → '2026년 12월 1일(화)'. 점 찍는 날짜에서 번역기가 문장을 나누는 것을 막음"""
+    """'2026. 12. 1.(화)' → '2026년 12월 1일(화)'. 점 찍는 날짜에서 번역기가 문장을 나누는 것을 막음.
+    기간의 ~ 뒤에 연도 없이 오는 날짜도 바꿈: '2026. 12. 8.(화) ~ 12. 19.(토)' → '… ~ 12월 19일(토)' (안기겸 리뷰 N25)"""
+    def ok(mo, d):
+        return 1 <= int(mo) <= 12 and 1 <= int(d) <= 31
+
     def one(m):
         y, mo, d = m.groups()
-        if not (1 <= int(mo) <= 12 and 1 <= int(d) <= 31):
-            return m.group()
-        return f'{y}년 {int(mo)}월 {int(d)}일'
-    return DOT_DATE.sub(one, text)
+        return f'{y}년 {int(mo)}월 {int(d)}일' if ok(mo, d) else m.group()
+
+    def tail(m):
+        sep, mo, d = m.groups()
+        return f'{sep}{int(mo)}월 {int(d)}일' if ok(mo, d) else m.group()
+    return RANGE_END.sub(tail, DOT_DATE.sub(one, text))
 
 
 def hide_angles(text: str) -> tuple[str, bool]:
