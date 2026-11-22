@@ -260,7 +260,8 @@ def extra_years(src: str, out: str, marks: dict[str, str]) -> bool:
 
 # ---------- 공지만 하는 전처리 (이슈 #16 3·4·5번) ----------
 DOT_DATE = re.compile(r'(?<!\d)(\d{4})\.\s?(\d{1,2})\.\s?(\d{1,2})(?!\d)\.?')
-RANGE_END = re.compile(r'([~∼〜]\s*)(\d{1,2})\.\s?(\d{1,2})(?![\d:])\.?')  # 기간 끝 'M. D.' (연도 없음)
+# 기간 끝 'M. D.' (연도 없음). 끝 마침표 필수: '1~1.5시간', '10:00~12.30' 은 날짜가 아님 (Kau-APEX 리뷰 2026-11-22)
+RANGE_END = re.compile(r'([~∼〜]\s*)(\d{1,2})\.\s?(\d{1,2})(?![\d:])\.')
 ANGLE = re.compile(r'<([^<>\n]+)>')
 SQUARE = re.compile(r'\[([^\[\]\n]+)\]')
 
