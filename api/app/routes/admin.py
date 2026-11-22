@@ -63,7 +63,8 @@ async def translate_missing(body: NoticeIn) -> dict[str, Text]:
         t = make_translator()
         for lang in ('en', 'th'):
             if lang not in out:
-                out[lang] = Text(title=await t.translate(body.title, lang), body=await t.translate(body.body, lang))
+                out[lang] = Text(title=await t.translate(body.title, lang, notice=True),
+                                 body=await t.translate(body.body, lang, notice=True))
     return out
 
 

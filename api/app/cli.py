@@ -56,7 +56,7 @@ def notices(args):
                 from app.live.translate import make_translator
                 t = make_translator()
                 for lang in tr:
-                    tr[lang] = tuple(asyncio.run(t.translate(x, lang)) for x in (args.title, args.body))
+                    tr[lang] = tuple(asyncio.run(t.translate(x, lang, notice=True)) for x in (args.title, args.body))
             for lang, (title, body) in tr.items():
                 if title and body:
                     c.execute('insert into notice_translation values (%s, %s, %s, %s)', (nid, lang, title, body))

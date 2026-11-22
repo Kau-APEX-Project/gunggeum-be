@@ -88,7 +88,7 @@ def test_split_particles(ko, spaced):
     from app.live.translate import split_particles
     terms = ('근정전', '경회루', '경복궁', '정전')  # 긴 것부터
     assert split_particles(ko, terms) == spaced
-    assert split_particles('"근정전"은', terms) == '"근정전 "은'  # 앞 따옴표 뒤도 용어 시작으로 봄
+    assert split_particles('"근정전"은', terms) == '"근정전"은'  # 따옴표로 이미 떨어져 있으면 그대로 (이슈 #16 1번)
 
 
 def test_glossary_terms_from_shipped_csv(monkeypatch):
@@ -275,3 +275,155 @@ def test_unwrap_capitalizes_sentence_start():
     assert unwrap_terms('"<span translate="no">the queen</span>" lived', marks) == '"The queen" lived'
     assert unwrap_terms('Later <span translate="no">the queen</span> lived', marks) == 'Later the queen lived'
     assert unwrap_terms('the king and the <span translate="no">the queen</span>', marks) == 'the king and the queen'
+
+
+# ---------- 이슈 #16 공지 자동 번역 품질 ----------
+
+NOTICE_TABLE = {**TABLE, '대비': {'en': 'Daebi (Queen Dowager)', 'th': 'แทบี'},
+                '조정': {'en': 'Jojeong (Royal Court / Main Courtyard)', 'th': 'โจจอง'},
+                '광화문': {'en': 'Gwanghwamun (Palace Gate)', 'th': 'ควังฮวามุน'},
+                '승하': {'en': 'Seungha (Passing of a Monarch)', 'th': 'ซึงฮา'}}
+W = '<span translate="no">{}</span>'.format
+
+
+@pytest.mark.parametrize('ko, out', [
+    ('취소합니다.\n근정전·경회루 일대는', f'취소합니다.\n{W("Geunjeongjeon")}·{W("Gyeonghoeru")} 일대는'),  # 줄바꿈·가운뎃점 뒤
+    ('(근정전) 앞', f'({W("Geunjeongjeon")}) 앞'),
+    ('  근정전은\n\n끝.  ', f'  {W("Geunjeongjeon")}은\n\n끝.  '),  # 공백·줄바꿈 그대로
+    ('용어 없음.\n둘째 줄', '용어 없음.\n둘째 줄'),
+    ('', ''),
+])
+def test_terms_found_after_newline_and_symbols(ko, out):
+    from app.live.translate import wrap_terms
+    assert wrap_terms(ko, 'en', NOTICE_TABLE)[0] == out
+
+
+def test_substitute_keeps_layout():
+    from app.live.translate import substitute_terms
+    assert substitute_terms('안내\n근정전·경회루', 'en', TABLE) == '안내\nGeunjeongjeon (Throne Hall)·Gyeonghoeru (Banquet Pavilion)'
+
+
+@pytest.mark.parametrize('ko, notice, out', [
+    ('태풍 북상에 대비해 통제합니다.', True, '태풍 북상에 대비해 통제합니다.'),       # 동사
+    ('오후 2시로 조정됩니다.', True, '오후 2시로 조정됩니다.'),
+    ('폭염 대비 안내', True, '폭염 대비 안내'),                                    # 일반 낱말
+    ('조정에서 조회를 열었다', True, f'{W("Jojeong")}에서 조회를 열었다'),          # 장소로 쓰인 조정은 감쌈
+    ('오후 2시로 조정됩니다.', False, f'오후 2시로 {W("Jojeong")}됩니다.'),         # 자막은 그대로
+    ('왕이 승하했습니다', False, f'왕이 {W("Seungha")}했습니다'),                  # 자막: 동사로 쓰여도 감쌈 (승하 → won 방지)
+])
+def test_notice_skips_verbs_and_plain_words(ko, notice, out):
+    from app.live.translate import wrap_terms
+    assert wrap_terms(ko, 'en', NOTICE_TABLE, notice=notice)[0] == out
+
+
+@pytest.mark.parametrize('ko, out', [
+    ('광화문 야간 조명 점등 시간을 연장합니다.', '광화문의 야간 조명 점등 시간을 연장합니다.'),
+    ('안내\n근정전 지붕 보수 공사로', '안내\n근정전의 지붕 보수 공사로'),
+    ('광화문 앞 해설', '광화문의 앞 해설'),
+    ('오늘 광화문 앞 해설', '오늘 광화문 앞 해설'),   # 줄 첫머리만
+    ('광화문은 닫습니다', '광화문은 닫습니다'),       # 이미 조사가 있음
+    ('광화문', '광화문'),
+])
+def test_add_ui(ko, out):
+    from app.live.translate import add_ui
+    assert add_ui(ko, ['근정전', '광화문']) == out
+
+
+@pytest.mark.parametrize('ko, out', [
+    ('2026. 8. 12.(수) 오후 2시부로', '2026년 8월 12일(수) 오후 2시부로'),
+    ('2026.12.1 휴관', '2026년 12월 1일 휴관'),
+    ('2026. 13. 1.', '2026. 13. 1.'),            # 날짜가 아님
+    ('전화 02-3700-3900', '전화 02-3700-3900'),
+])
+def test_korean_dates(ko, out):
+    from app.live.translate import korean_dates
+    assert korean_dates(ko) == out
+
+
+def test_angle_headers_round_trip():
+    from app.live.translate import hide_angles, show_angles
+    assert hide_angles('<긴급> 해설 취소') == ('[긴급] 해설 취소', True)
+    assert show_angles('[ Emergency ] Tour canceled') == '<Emergency> Tour canceled'
+    assert hide_angles('[안내] <긴급>') == ('[안내] <긴급>', False)  # 대괄호가 이미 있으면 그대로
+    assert hide_angles('괄호 없음') == ('괄호 없음', False)
+
+
+def test_wrap_years():
+    from app.live.translate import wrap_years
+    assert wrap_years('1985년에 보물로') == '<span translate="no">1985</span>년에 보물로'
+    assert wrap_years('12345년, 2시') == '12345년, 2시'
+
+
+@pytest.mark.parametrize('tr, lang, out', [
+    ('in <span translate="no">1985</span>.', 'en', 'in 1985.'),
+    ("in '<span translate=\"no\">2018</span>'.", 'en', 'in 2018.'),                  # 따옴표 뗌
+    ('ถูกกำหนดในปี <span translate="no">1985</span>', 'th', 'ถูกกำหนดในปี 1985'),        # 이미 ปี
+    ('ถูกกำหนดเป็นสมบัติใน<span translate="no">1985</span>', 'th', 'ถูกกำหนดเป็นสมบัติในปี 1985'),  # ปี 붙임
+    ('<span translate="no">1927</span> ถูกย้าย', 'th', 'ปี 1927 ถูกย้าย'),
+    ('1 ธันวาคม <span translate="no">2026</span>', 'th', '1 ธันวาคม 2026'),           # 달 이름 뒤
+    ('ค.ศ. <span translate="no">1395</span>', 'th', 'ค.ศ. 1395'),
+])
+def test_put_years(tr, lang, out):
+    from app.live.translate import put_years
+    assert put_years(tr, lang) == out
+
+
+def test_extra_years():
+    from app.live.translate import extra_years
+    assert extra_years('2015년에 복원', 'restored in 1967 and 2015', {})
+    assert not extra_years('2015년에 복원', 'restored in 2015', {})
+    assert not extra_years('임진왜란 때', 'during Imjin War (1592–1598)', {'Imjin': 'Imjin War (1592–1598)'})  # 용어 표기 연도는 허용
+    assert not extra_years('전화 02-3700-3900', 'Tel 02-3700-3900', {})
+
+
+class Recorder:
+    """보낸 글을 적고, replies 를 차례로 돌려줌 (없으면 보낸 글 그대로)"""
+
+    def __init__(self, *replies):
+        self.sent, self.replies = [], list(replies)
+
+    def translate_text(self, **kw):
+        self.sent.append(kw['Text'])
+        return {'TranslatedText': self.replies.pop(0) if self.replies else kw['Text']}
+
+
+@pytest.fixture
+def notranslate(monkeypatch):
+    monkeypatch.setenv('TRANSLATE_TERM_MODE', 'notranslate')
+    monkeypatch.delenv('TRANSLATE_TERMS_PATH', raising=False)
+
+
+def test_years_protected_in_subtitles(notranslate):
+    c = Recorder('ถูกกำหนดเป็นสมบัติใน<span translate="no">1985</span>')
+    out = run(AwsTranslator(c).translate('1985년에 보물로 지정됐습니다.', 'th'))
+    assert c.sent == ['<span translate="no">1985</span>년에 보물로 지정됐습니다.']
+    assert out == 'ถูกกำหนดเป็นสมบัติในปี 1985'
+
+
+def test_invented_year_retranslates_without_year_protection(notranslate):
+    c = Recorder('restored in 1967 <span translate="no">2015</span>', 'restored in 2015')
+    out = run(AwsTranslator(c).translate('2015년에 복원했습니다.', 'en'))
+    assert out == 'restored in 2015'
+    assert c.sent == ['<span translate="no">2015</span>년에 복원했습니다.', '2015년에 복원했습니다.']
+
+
+def test_notice_mode_end_to_end(notranslate):
+    c = Recorder()
+    text = '<긴급> 2026. 8. 12.(수) 해설 취소\n광화문 야간 조명을 조정합니다.\n근정전·경회루 일대는 폭염 대비 통제'
+    out = run(AwsTranslator(c).translate(text, 'en', notice=True))
+    assert c.sent == ['[긴급] <span translate="no">2026</span>년 8월 12일(수) 해설 취소\n'
+                      '<span translate="no">Gwanghwamun</span>의 야간 조명을 조정합니다.\n'
+                      '<span translate="no">Geunjeongjeon</span>·<span translate="no">Gyeonghoeru</span> 일대는 폭염 대비 통제']
+    assert out.startswith('<긴급> 2026년 8월 12일(수)')
+    assert 'Gwanghwamun (Palace Gate)의' in out and 'Geunjeongjeon (Throne Hall)·Gyeonghoeru (Banquet Pavilion)' in out
+
+
+def test_subtitles_skip_notice_steps(notranslate):
+    c = Recorder()
+    run(AwsTranslator(c).translate('광화문 앞에서 조정됩니다', 'en'))
+    assert c.sent == ['<span translate="no">Gwanghwamun</span> 앞에서 <span translate="no">Jojeong</span>됩니다']
+
+
+def test_echo_accepts_notice():
+    from app.live.translate import EchoTranslator
+    assert run(EchoTranslator().translate('안내', 'en', notice=True)) == '안내'
