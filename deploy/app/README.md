@@ -17,7 +17,7 @@ db·redis 는 건드리지 않습니다. 배포하는 동안 api·통역 연결�
 | 2 | AWS IAM | GitHub OIDC 공급자 `token.actions.githubusercontent.com` (대상 `sts.amazonaws.com`) 추가 |
 | 3 | AWS IAM | 역할 `gunggeum-github-deploy`: 신뢰 `iam-trust.json` (`sub` 의 @숫자는 GitHub 조직·리포 고유 번호, 이름이 바뀌거나 새로 만들어져도 다른 리포가 쓸 수 없음), 권한 `iam-permissions.json` (`<ACCOUNT_ID>`·`<APP_INSTANCE_ID>` 를 채움) |
 | 4 | AWS SSM | `ssm-document.json` 으로 Command 문서 `gunggeum-deploy` 만들기 |
-| 5 | GitHub 설정 | 환경 `production`: 승인자 지정, 배포 브랜치 `develop` 만, 변수 `AWS_DEPLOY_ROLE_ARN`·`APP_INSTANCE_ID` |
+| 5 | GitHub 설정 | 환경 `production`: 승인자 지정, 배포 브랜치 `develop` 만, secret `AWS_DEPLOY_ROLE_ARN`·`APP_INSTANCE_ID` (변수로 두면 공개 로그에 보임) |
 | 6 | GitHub 설정 | 리포 변수 `DEPLOY_ENABLED=1` (이때부터 배포가 켜짐. 끄려면 지움) |
 
 ## 손으로 배포·되돌리기

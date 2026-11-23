@@ -30,11 +30,12 @@ jobs:
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ap-northeast-2
+          mask-aws-account-id: true   # 공개 리포라 로그에서 가림
       - name: SSM 배포
         env:
-          INSTANCE_ID: ${{ vars.APP_INSTANCE_ID }}
+          INSTANCE_ID: ${{ secrets.APP_INSTANCE_ID }}
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
