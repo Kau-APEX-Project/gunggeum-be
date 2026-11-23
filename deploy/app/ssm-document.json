@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "2.2",
+  "description": "gunggeum app deploy: run deploy.sh for one commit on develop",
+  "parameters": {
+    "sha": {
+      "type": "String",
+      "description": "commit SHA (40 hex)",
+      "allowedPattern": "^[0-9a-f]{40}$"
+    }
+  },
+  "mainSteps": [
+    {
+      "action": "aws:runShellScript",
+      "name": "deploy",
+      "inputs": {
+        "timeoutSeconds": "1200",
+        "runCommand": ["bash /opt/gunggeum-be/deploy/app/deploy.sh {{ sha }}"]
+      }
+    }
+  ]
+}

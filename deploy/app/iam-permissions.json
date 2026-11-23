@@ -1,0 +1,20 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RunDeployDocumentOnly",
+      "Effect": "Allow",
+      "Action": "ssm:SendCommand",
+      "Resource": [
+        "arn:aws:ssm:ap-northeast-2:<ACCOUNT_ID>:document/gunggeum-deploy",
+        "arn:aws:ec2:ap-northeast-2:<ACCOUNT_ID>:instance/<APP_INSTANCE_ID>"
+      ]
+    },
+    {
+      "Sid": "ReadResult",
+      "Effect": "Allow",
+      "Action": "ssm:GetCommandInvocation",
+      "Resource": "*"
+    }
+  ]
+}
