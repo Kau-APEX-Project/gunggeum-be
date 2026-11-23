@@ -1,0 +1,51 @@
+# develop 에 합쳐지면: ci 테스트 → (production 환경 승인) → SSM 으로 앱 서버 배포
+# AWS 키 없이 OIDC 로 역할을 빌림. 준비 순서는 deploy/app/README.md
+name: deploy
+on:
+  push:
+    branches: [develop]
+    paths-ignore: ['docs/**', '**.md']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    # 리포 변수 DEPLOY_ENABLED 를 1 로 켜기 전에는 건너뜀
+    if: vars.DEPLOY_ENABLED == '1'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-northeast-2
+      - name: SSM 배포
+        env:
+          INSTANCE_ID: ${{ vars.APP_INSTANCE_ID }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          id=$(aws ssm send-command --document-name gunggeum-deploy --instance-ids "$INSTANCE_ID" \
+            --parameters "sha=$SHA" --comment "deploy $SHA" --query Command.CommandId --output text)
+          echo "command: $id"
+          for _ in $(seq 1 150); do
+            sleep 8
+            status=$(aws ssm get-command-invocation --command-id "$id" --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || echo Pending)
+            case "$status" in Success|Failed|Cancelled|TimedOut) break ;; esac
+          done
+          # 공개 리포라 서버 로그 전체는 남기지 않고 결과만 남김 (자세한 로그는 SSM 콘솔)
+          echo "status: $status"
+          [ "$status" = Success ]

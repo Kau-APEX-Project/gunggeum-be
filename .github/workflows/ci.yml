@@ -2,6 +2,7 @@
 # + Nginx 설정 문법 검사
 name: ci
 on:
+  workflow_call:   # deploy.yml 이 배포 전에 부름
   pull_request:
   push:
     branches: [main]
