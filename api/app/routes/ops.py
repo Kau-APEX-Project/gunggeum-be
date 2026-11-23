@@ -4,7 +4,7 @@
   GET  /api/notices        공지 목록 (T-10 배너 · T-50)
   POST /api/stats/visits   방문 익명 집계 (T-51)
 
-일정·공지는 운영자가 `python -m app.cli` 로 넣음 (자동 수집 배치는 수집 대상이 정해지면 추가)."""
+일정·공지는 운영자가 `python -m app.cli` 로 넣음. 자동 수집(app/collect.py)한 공지는 운영자가 승인한 것만 나옴."""
 from datetime import date, datetime, timedelta
 from typing import Literal
 
@@ -41,7 +41,7 @@ async def tours_today(pool=Depends(db)):
 @router.get('/notices')
 async def notices(lang: Literal['en', 'th', 'ko'] = 'en', since: datetime | None = None, pool=Depends(db)):
     """번역이 있으면 그 언어, 없으면 한국어 원문 (lang 필드로 구분)"""
-    sql = ('select n.id, n.type, n.published_at, coalesce(t.title, n.title) as title, coalesce(t.body, n.body) as body, '
+    sql = ('select n.id, n.type, n.published_at, n.source_url, coalesce(t.title, n.title) as title, coalesce(t.body, n.body) as body, '
            "case when t.title is null then 'ko' else t.lang end as lang "
            'from notice n left join notice_translation t on t.notice_id = n.id and t.lang = %s')
     args: list = [lang]
@@ -51,7 +51,8 @@ async def notices(lang: Literal['en', 'th', 'ko'] = 'en', since: datetime | None
     async with pool.connection() as c:
         rows = await (await c.execute(sql + ' order by n.published_at desc limit 20', args)).fetchall()
     return {'notices': [{'id': x['id'], 'type': x['type'], 'title': x['title'], 'body': x['body'],
-                         'publishedAt': iso(x['published_at']), 'lang': x['lang']} for x in rows]}
+                         'publishedAt': iso(x['published_at']), 'lang': x['lang'],
+                         'sourceUrl': x['source_url']} for x in rows]}
 
 
 class VisitIn(BaseModel):

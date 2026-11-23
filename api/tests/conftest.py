@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 ADMIN = os.environ.get('TEST_PG_ADMIN_URL', 'postgresql://postgres:gbg@127.0.0.1:5433/postgres')
-TABLES = 'live_session, session_language, session_card_mention, tour_schedule, notice, notice_translation, visit_stat'
+TABLES = 'live_session, session_language, session_card_mention, tour_schedule, notice, notice_translation, notice_draft, notice_collect, visit_stat'
 # 카드 링크 테스트용 전각 하나 (실제 docs 테이블 대신)
 METAS = [{'type': 'building', 'serial': 160, 'name': '근정전', 'name_en': 'Geunjeongjeon (Throne Hall)'}]
 

@@ -55,6 +55,23 @@ create table if not exists notice_translation (
   body      text not null,
   primary key (notice_id, lang)
 );
+create table if not exists notice_draft (            -- 자동 수집한 공지 후보. 승인 전에는 관람객에게 안 보임 (app/collect.py)
+  id           text primary key,                     -- 사이트의 글 번호
+  title        text not null,
+  notice_date  date not null,
+  source_url   text not null unique,
+  status       text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  notice_id    text references notice(id) on delete set null,
+  collected_at timestamptz not null default now(),
+  decided_by   text,
+  decided_at   timestamptz
+);
+create table if not exists notice_collect (          -- 마지막 수집 결과 (한 줄)
+  id            int primary key check (id = 1),
+  last_ok_at    timestamptz,
+  last_error    text,
+  last_error_at timestamptz
+);
 create table if not exists visit_stat (              -- 날짜·POI·언어·사건 단위 합계만. 사용자 식별자·좌표 없음
   stat_date date,
   poi_id    text,

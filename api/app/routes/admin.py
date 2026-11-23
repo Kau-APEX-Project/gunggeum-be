@@ -3,6 +3,10 @@
   POST   /api/admin/notices              공지 추가 (번역 직접 입력 또는 Translate 자동 번역)
   GET    /api/admin/notices              공지 목록 (번역 언어 · 입력자 포함)
   DELETE /api/admin/notices/{id}         공지 삭제
+  GET    /api/admin/notice-drafts        자동 수집한 공지 초안 (?status=pending · approved · rejected)
+  POST   /api/admin/notice-drafts/{id}/preview   저장하지 않고 번역만 해 보기
+  POST   /api/admin/notice-drafts/{id}/approve   영어·태국어를 확인해 넣고 공개
+  POST   /api/admin/notice-drafts/{id}/reject    거절
   POST   /api/admin/tours                해설 일정 추가 (한 날짜에 여러 시각)
   GET    /api/admin/tours?date=          그 날짜 일정 (연결된 세션 포함)
   DELETE /api/admin/tours?date=&time=    일정 하나 삭제
@@ -84,20 +88,25 @@ async def notice_rows(pool, notice_id: str | None = None) -> list[dict]:
             for x in rows]
 
 
+async def insert_notice(c, body: 'NoticeIn | ApproveIn', translations: dict[str, Text], url: str | None, who: str) -> str:
+    t = now()
+    if url and await (await c.execute('select 1 from notice where source_url = %s', (url,))).fetchone():
+        raise ApiError(409, '같은 원문 URL 의 공지가 이미 있습니다')
+    prefix = f"n-{t:%Y%m%d}-"
+    n = (await (await c.execute("select coalesce(max(split_part(id, '-', 3)::int), 0) as n from notice where id like %s", (prefix + '%',))).fetchone())['n']
+    nid = f'{prefix}{n + 1:02d}'  # 가장 큰 번호 + 1 (개수 + 1 이면 지운 뒤 번호가 겹침)
+    await c.execute('insert into notice (id, type, title, body, source_url, published_at, created_by) '
+                    'values (%s, %s, %s, %s, %s, %s, %s)', (nid, body.type, body.title, body.body, url, t, who))
+    for lang, tr in translations.items():
+        await c.execute('insert into notice_translation values (%s, %s, %s, %s)', (nid, lang, tr.title, tr.body))
+    return nid
+
+
 @router.post('/notices', status_code=201)
 async def add_notice(body: NoticeIn, who: str = Depends(admin), pool=Depends(db)):
     translations = await translate_missing(body)
-    t = now()
     async with pool.connection() as c, c.transaction():
-        if body.url and await (await c.execute('select 1 from notice where source_url = %s', (body.url,))).fetchone():
-            raise ApiError(409, '같은 원문 URL 의 공지가 이미 있습니다')
-        prefix = f"n-{t:%Y%m%d}-"
-        n = (await (await c.execute("select coalesce(max(split_part(id, '-', 3)::int), 0) as n from notice where id like %s", (prefix + '%',))).fetchone())['n']
-        nid = f'{prefix}{n + 1:02d}'  # 가장 큰 번호 + 1 (개수 + 1 이면 지운 뒤 번호가 겹침)
-        await c.execute('insert into notice (id, type, title, body, source_url, published_at, created_by) '
-                        'values (%s, %s, %s, %s, %s, %s, %s)', (nid, body.type, body.title, body.body, body.url, t, who))
-        for lang, tr in translations.items():
-            await c.execute('insert into notice_translation values (%s, %s, %s, %s)', (nid, lang, tr.title, tr.body))
+        nid = await insert_notice(c, body, translations, body.url, who)
     log.info('공지 추가 %s by %s', nid, who)
     return (await notice_rows(pool, nid))[0]
 
@@ -115,6 +124,70 @@ async def delete_notice(notice_id: str, who: str = Depends(admin), pool=Depends(
         raise ApiError(404, '없는 공지')
     log.info('공지 삭제 %s by %s', notice_id, who)
     return Response(status_code=204)
+
+
+# ---------- 공지 초안 (자동 수집 → 승인) ----------
+
+class ApproveIn(Text):
+    """title·body 는 운영자가 쓴 한국어 제목·요약 (원문을 그대로 옮기지 않음)"""
+    type: Literal['tour_cancelled', 'weather', 'event_change']
+    en: Text  # 확인한 번역. 둘 다 있어야 공개
+    th: Text
+
+
+def draft_json(x: dict) -> dict:
+    return {'id': x['id'], 'title': x['title'], 'date': x['notice_date'].isoformat(), 'url': x['source_url'],
+            'status': x['status'], 'noticeId': x['notice_id'], 'collectedAt': iso(x['collected_at']),
+            'decidedBy': x['decided_by'], 'decidedAt': iso(x['decided_at'])}
+
+
+async def decide(c, draft_id: str, status: str, who: str) -> dict:
+    """대기 중인 초안만 처리. 두 사람이 동시에 눌러도 한 번만 됨"""
+    row = await (await c.execute("update notice_draft set status = %s, decided_by = %s, decided_at = now() "
+                                 "where id = %s and status = 'pending' returning *", (status, who, draft_id))).fetchone()
+    if row is None:
+        seen = await (await c.execute('select 1 from notice_draft where id = %s', (draft_id,))).fetchone()
+        raise ApiError(409, '이미 처리한 초안입니다') if seen else ApiError(404, '없는 초안')
+    return row
+
+
+@router.get('/notice-drafts')
+async def list_drafts(status: Literal['pending', 'approved', 'rejected'] = 'pending', pool=Depends(db)):
+    async with pool.connection() as c:
+        rows = await (await c.execute('select * from notice_draft where status = %s '
+                                      'order by notice_date desc, id desc limit 100', (status,))).fetchall()
+        run = await (await c.execute('select * from notice_collect where id = 1')).fetchone()
+    run = run or {'last_ok_at': None, 'last_error': None, 'last_error_at': None}
+    return {'drafts': [draft_json(x) for x in rows],
+            'collect': {'lastOkAt': iso(run['last_ok_at']), 'lastError': run['last_error'],
+                        'lastErrorAt': iso(run['last_error_at'])}}
+
+
+@router.post('/notice-drafts/{draft_id}/preview')
+async def preview_draft(draft_id: str, body: Text, pool=Depends(db)):
+    """운영자가 쓴 제목·요약을 영어·태국어로 번역해 돌려줌 (저장하지 않음)"""
+    async with pool.connection() as c:
+        if not await (await c.execute('select 1 from notice_draft where id = %s', (draft_id,))).fetchone():
+            raise ApiError(404, '없는 초안')
+    return await translate_missing(NoticeIn(type='event_change', title=body.title, body=body.body, translate=True))
+
+
+@router.post('/notice-drafts/{draft_id}/approve', status_code=201)
+async def approve_draft(draft_id: str, body: ApproveIn, who: str = Depends(admin), pool=Depends(db)):
+    async with pool.connection() as c, c.transaction():
+        row = await decide(c, draft_id, 'approved', who)
+        nid = await insert_notice(c, body, {'en': body.en, 'th': body.th}, row['source_url'], who)
+        await c.execute('update notice_draft set notice_id = %s where id = %s', (nid, draft_id))
+    log.info('공지 초안 승인 %s -> %s by %s', draft_id, nid, who)
+    return (await notice_rows(pool, nid))[0]
+
+
+@router.post('/notice-drafts/{draft_id}/reject')
+async def reject_draft(draft_id: str, who: str = Depends(admin), pool=Depends(db)):
+    async with pool.connection() as c, c.transaction():
+        row = await decide(c, draft_id, 'rejected', who)
+    log.info('공지 초안 거절 %s by %s', draft_id, who)
+    return draft_json(row)
 
 
 # ---------- 해설 일정 ----------
