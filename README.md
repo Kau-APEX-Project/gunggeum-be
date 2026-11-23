@@ -59,6 +59,7 @@ gunggeum-be/
 | WS | `/ws/sessions/{code}/guide?token=` | G-03 | 발화 오디오(binary) · `location` · `mic` · `ping` · (개발용) `text` |
 | WS | `/ws/sessions/{code}/listen?lang=en` | T-31 | `subtitle` · `gap` · `mic` · `session_ended` · `pong` |
 
+| GET · POST | `/api/admin/notice-drafts` | 운영자 | 자동 수집한 공지 초안 목록 · 번역 미리보기 · 승인 · 거절. 승인한 것만 공개 |
 | POST · GET · DELETE | `/api/admin/notices`, `/api/admin/tours` | 운영자 | 공지·해설 일정 입력. `Authorization: Bearer <ADMIN_TOKEN>` (비우면 꺼짐) |
 | GET | `/api/dev/live-tester` | 개발용 | 라이브 투어 브라우저 테스트 페이지 (`DEV_TOOLS=1`일 때만) |
 

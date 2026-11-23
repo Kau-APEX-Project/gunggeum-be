@@ -5,6 +5,7 @@
   docker compose exec api python -m app.cli notices add --type tour_cancelled \\
       --title "오늘 14:00 영어 해설 우천 취소" --body "..." --translate
   docker compose exec api python -m app.cli notices list
+  docker compose exec -T api python -m app.cli collect       경복궁 공지 → 초안 (승인은 /api/admin/notice-drafts)
 
 --translate 는 Amazon Translate(TRANSLATE_PROVIDER=aws)로 영어·태국어를 만듦. 직접 넣으려면 --en-title/--en-body/--th-title/--th-body.
 """
@@ -69,6 +70,18 @@ def notices(args):
             print(f"{x['id']}  {x['type']:<15} {x['title']}  [{', '.join(x['langs'] or []) or '번역 없음'}]")
 
 
+def collect(args):
+    from app import collect as col
+    with connect() as c:
+        try:
+            new = col.run(c)
+        except col.CollectError as e:
+            sys.exit(f'수집 실패: {e}')
+    print(f'새 초안 {len(new)}건')
+    for x in new:
+        print(f"{x['date']}  {x['title']}")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog='python -m app.cli')
     sub = p.add_subparsers(dest='cmd', required=True)
@@ -90,6 +103,7 @@ def main(argv=None):
         n.add_argument(f'--{lang}-title')
         n.add_argument(f'--{lang}-body')
     n.set_defaults(fn=notices)
+    sub.add_parser('collect', help='공지 자동 수집 (초안)').set_defaults(fn=collect)
     args = p.parse_args(argv)
     args.fn(args)
 

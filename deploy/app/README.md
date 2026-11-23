@@ -25,3 +25,19 @@ db·redis 는 건드리지 않습니다. 배포하는 동안 api·통역 연결�
 ```bash
 sudo bash /opt/gunggeum-be/deploy/app/deploy.sh <develop 에 있는 커밋 40자>
 ```
+
+## 공지 자동 수집 켜기 (처음 한 번)
+
+경복궁 공지의 제목·날짜·링크만 초안으로 저장합니다. 운영자가 `/api/admin/notice-drafts` 에서 승인한 것만 관람객에게 나옵니다.
+
+```bash
+cd /opt/gunggeum-be
+docker compose exec -T api python -m app.cli collect        # 손으로 한 번 → "새 초안 N건"
+cp deploy/app/gunggeum-notice-collect.service deploy/app/gunggeum-notice-collect.timer /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now gunggeum-notice-collect.timer
+journalctl -u gunggeum-notice-collect.service -n 20         # 지난 실행 결과
+```
+
+- 새 초안 메일: SNS 주제를 만들어 운영자 메일을 구독하고, 서버 역할에 그 주제만 `sns:Publish` 를 준 뒤 `.env` 에 `NOTICE_SNS_TOPIC_ARN` 을 넣음
+- 사이트를 읽지 못하면 실행이 실패로 남고, 초안 목록 응답의 `collect.lastError` 에 이유가 나옴
+- 끄기: `systemctl disable --now gunggeum-notice-collect.timer`

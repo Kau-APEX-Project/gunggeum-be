@@ -1,0 +1,9 @@
+[Unit]
+Description=gunggeum notice collect (drafts only)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/gunggeum-be
+ExecStart=/usr/bin/docker compose exec -T api python -m app.cli collect
