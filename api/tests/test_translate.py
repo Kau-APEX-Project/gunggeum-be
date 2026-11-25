@@ -147,8 +147,8 @@ def test_substitute_mode_skips_terminology(monkeypatch):
     run(t.translate('근정전은 경복궁의 정전입니다.', 'en'))
     th = run(t.translate('근정전은 경복궁의 정전입니다.', 'th'))  # 태국어는 GGT 토큰으로 보내고 되돌림
     assert sent == [('Geunjeongjeon (Throne Hall)은 Gyeongbokgung Palace의 Jeongjeon (main hall of a palace)입니다.', None),
-                    ('GGT0은 경복궁의 GGT1입니다.', None)]  # 경복궁은 태국어 표기가 비어 있어 그대로
-    assert th == 'คึนจองจอน (ท้องพระโรง)은 경복궁의 ชองจอน (ท้องพระโรงหลัก)입니다.'
+                    ('GGT0은 GGT1의 GGT2입니다.', None)]  # 경복궁도 태국어 표기가 생김 (AI 리포 d4b2da8)
+    assert th == 'คึนจองจอน (ท้องพระโรง)은 พระราชวังคย็องบก의 ชองจอน (ท้องพระโรงหลัก)입니다.'
     monkeypatch.setenv('TRANSLATE_SUBSTITUTE_LANGS', 'en,th')
     sent.clear()
     run(AwsTranslator(C()).translate('근정전은', 'th'))
@@ -454,3 +454,47 @@ def test_term_in_paren_after_term_uses_name_only(ko, lang, out):
     from app.live.translate import unwrap_terms, wrap_terms
     wrapped, marks = wrap_terms(ko, lang, PAREN_TABLE)
     assert unwrap_terms(wrapped, marks) == out
+
+
+# ---------- 이슈 #16 6번: AI 리포 단어 목록 (gunggeum-ai-stt main d4b2da8) ----------
+
+def test_notice_plain_words_loaded_from_csv(tmp_path):
+    from app.live.translate import _load_plain_words, DEFAULT_NOTICE_PLAIN, NOTICE_PLAIN_FALLBACK
+    words = _load_plain_words(str(DEFAULT_NOTICE_PLAIN))
+    assert {'대비', '부재', '조회', '동반', '정전', '가산'} <= words
+    assert '조정' not in words  # '조정됩니다' 는 동사 규칙이 처리, '근정전앞 조정에서는' 은 장소
+    path = tmp_path / 'p.csv'
+    path.write_text('ko,공지에서 쓰이는 뜻\n권역,"구역, 지역"\n,\n', encoding='utf-8')
+    assert _load_plain_words(str(path)) == {'권역'}
+    assert _load_plain_words(str(tmp_path / 'none.csv')) == NOTICE_PLAIN_FALLBACK
+
+
+def test_notice_plain_words_env(tmp_path, monkeypatch):
+    from app.live.translate import notice_terms
+    path = tmp_path / 'p.csv'
+    path.write_text('ko,뜻\n근정전,x\n', encoding='utf-8')
+    monkeypatch.setenv('TRANSLATE_NOTICE_PLAIN_PATH', str(path))
+    assert notice_terms(['근정전', '대비']) == ['대비']
+
+
+@pytest.mark.parametrize('ko, notice, out', [
+    ('광화문광장에서 모입니다', True, 'Gwanghwamun Square에서 모입니다'),               # 붙은 이름이 통째로
+    ('경복궁역 5번 출구', True, 'Gyeongbokgung Station 5번 출구'),
+    ('경복궁관리소로 문의', True, 'Gyeongbokgung Palace Management Office로 문의'),
+    ('정전 발생으로 관람을 멈춥니다', True, '정전 발생으로 관람을 멈춥니다'),             # 공지: 일반 낱말
+    ('정전 발생으로 관람을 멈춥니다', False, 'Jeongjeon (main hall of a palace) 발생으로 관람을 멈춥니다'),  # 자막: 용어 그대로
+    ('근정전 앞', True, 'Geunjeongjeon (Throne Hall) 앞'),                               # 긴 용어가 먼저라 '정전' 목록에 안 걸림
+])
+def test_real_glossary_notice_words(ko, notice, out):
+    from app.live.translate import DEFAULT_TERMS, _load_glossary, unwrap_terms, wrap_terms
+    table = _load_glossary(str(DEFAULT_TERMS))
+    wrapped, marks = wrap_terms(ko, 'en', table, notice=notice)
+    assert unwrap_terms(wrapped, marks) == out
+
+
+def test_real_glossary_thai_for_plain_words():
+    """경복궁·왕·왕비에 태국어 표기가 생겨 태국어 자막에서도 고정됨"""
+    from app.live.translate import DEFAULT_TERMS, _load_glossary
+    table = _load_glossary(str(DEFAULT_TERMS))
+    assert table['경복궁']['th'] and table['왕']['th'] and table['왕비']['th']
+    assert table['임금']['en'] == 'the king'

@@ -20,9 +20,10 @@ WORD = re.compile(r'[0-9A-Za-z가-힣]*')  # 용어 바로 뒤에 이어지는 �
 # 공지 번역만: 용어 바로 뒤가 하다·되다 활용형이면 동사로 보고 감싸지 않음 ('대비해', '조정됩니다'). 이슈 #16 2번
 # 자막은 '승하했습니다' 처럼 어려운 한자어 동사가 많아 감싸지 않으면 오역됨(승하 → won) → 자막엔 안 씀
 VERB = re.compile(r'(하|했|한|할|함|합|해|되|됐|된|될|됨|됩|돼)')
-# 공지 번역만: 일반 낱말과 글자가 같은 용어는 감싸지 않음 ('폭염 대비', '담당자 부재', '조회 수'). 이슈 #16 2번
-# (전각·장소 이름만 고정하는 안은 용어집에 분류 열이 없어, 공지 예문에서 문제가 된 낱말만 뺌)
-NOTICE_PLAIN_WORDS = frozenset({'대비', '부재', '조회'})
+# 공지 번역만: 일반 낱말과 글자가 같은 용어는 감싸지 않음 ('폭염 대비', '담당자 부재', '조회 수'). 이슈 #16 2번·6번
+# 목록은 AI 리포 gunggeum-ai-stt 의 notice_plain_words.csv (ko 열) 를 복사해 읽음. 파일을 못 읽으면 아래 기본 3개
+DEFAULT_NOTICE_PLAIN = Path(__file__).resolve().parents[2] / 'data' / 'notice_plain_words.csv'
+NOTICE_PLAIN_FALLBACK = frozenset({'대비', '부재', '조회'})
 
 
 @lru_cache(maxsize=4)
@@ -44,6 +45,22 @@ def _load_glossary(path: str) -> dict[str, dict[str, str]]:
 
 def glossary() -> dict[str, dict[str, str]]:
     return _load_glossary(env('TRANSLATE_TERMS_PATH') or str(DEFAULT_TERMS))
+
+
+@lru_cache(maxsize=4)
+def _load_plain_words(path: str) -> frozenset[str]:
+    """공지에서 감싸지 않을 용어 CSV (ko, 공지에서 쓰이는 뜻) → ko 열 집합. 못 읽으면 NOTICE_PLAIN_FALLBACK"""
+    try:
+        with open(path, encoding='utf-8', newline='') as f:
+            words = frozenset((r.get('ko') or '').strip() for r in csv.DictReader(f))
+    except OSError:
+        log.warning('공지 일반 낱말 CSV 를 읽지 못함: %s (기본 %d개 사용)', path, len(NOTICE_PLAIN_FALLBACK))
+        return NOTICE_PLAIN_FALLBACK
+    return words - {''}
+
+
+def notice_plain_words() -> frozenset[str]:
+    return _load_plain_words(env('TRANSLATE_NOTICE_PLAIN_PATH') or str(DEFAULT_NOTICE_PLAIN))
 
 
 def roman_name(en: str) -> str:
@@ -159,7 +176,8 @@ def _paren_inner(items) -> set[int]:
 
 def notice_terms(terms: list[str]) -> list[str]:
     """공지 번역에서 감쌀 용어 (일반 낱말과 같은 용어 뺌)"""
-    return [t for t in terms if t not in NOTICE_PLAIN_WORDS]
+    plain = notice_plain_words()
+    return [t for t in terms if t not in plain]
 
 
 def wrap_terms(text: str, lang: str, table: dict[str, dict[str, str]], notice: bool = False) -> tuple[str, dict[str, str]]:
@@ -168,7 +186,7 @@ def wrap_terms(text: str, lang: str, table: dict[str, dict[str, str]], notice: b
     번역 뒤 unwrap_terms 가 그 언어 카드 표기로 바꿈 → 영어·태국어가 같은 방식, 카드 링크도 맞음.
     안기겸 검토(2026-11-10, 300문장 772항목): 괄호 설명까지 넣기 84.1%, 이름만 넣고 뒤에 붙이기 94.2%, 번역 제외 표시 99.2%.
     로마자 이름이 없거나 다른 용어와 겹치면 GGT 토큰. 돌려주는 표: {감싼 글자: 그 언어 표기}
-    notice=True (공지): 일반 낱말과 같은 용어(NOTICE_PLAIN_WORDS)와 동사로 쓰인 용어('조정됩니다')는 감싸지 않음"""
+    notice=True (공지): 일반 낱말과 같은 용어(notice_plain_words.csv)와 동사로 쓰인 용어('조정됩니다')는 감싸지 않음"""
     if not table:
         return text, {}
     terms = term_table(lang, table)
