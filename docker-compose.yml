@@ -22,7 +22,7 @@ x-app: &app
 
 services:
   nginx:
-    image: nginx:1.27-alpine
+    image: nginx:1.30.8-alpine
     ports:
       # 터널(cloudflared)만 들어오게 기본은 이 PC 안에서만. EC2 는 HTTP_BIND=0.0.0.0 · HTTP_PORT=80 (보안 그룹은 CloudFront 대역만)
       - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:80"

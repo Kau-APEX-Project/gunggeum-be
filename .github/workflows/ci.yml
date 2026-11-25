@@ -41,4 +41,4 @@ jobs:
           docker run --rm --add-host api:127.0.0.1 --add-host realtime:127.0.0.1 \
             -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
             -v "$PWD/nginx/proxy.conf:/etc/nginx/proxy.conf:ro" \
-            nginx:1.27-alpine nginx -t
+            nginx:1.30.8-alpine nginx -t
