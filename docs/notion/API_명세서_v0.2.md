@@ -70,9 +70,12 @@
 
 | 경로 | 기준 | 순간 허용 |
 | --- | --- | --- |
-| `POST /api/ask`, `POST /api/course` | 관광객 IP당 분당 10회 | 5회 |
+| `POST /api/ask`, `POST /api/course` | 관광객 IP당 분당 30회 | 10회 |
 | `POST /api/sessions` | IP당 분당 5회 | 3회 |
 | `POST /api/stats/visits` | IP당 분당 30회 | 10회 |
+| `/api/admin/*` | IP당 분당 30회 | 10회 |
+| 그 밖의 `/api/*` (`/api/health` 제외) | IP당 분당 120회 | 60회 |
+| `/ws/*` 연결 | IP당 연결 시도 분당 120회, 동시 연결 100개 | 60회 |
 
 관광객 IP는 CloudFront가 붙이는 `CloudFront-Viewer-Address` 헤더로 구분합니다 (CloudFront 오리진 요청 정책에 이 헤더를 넣어야 함).
 
